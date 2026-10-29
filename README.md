@@ -40,68 +40,15 @@ También puedes seguir esta misma guía interactiva directamente desde el **Pane
    * Abre Cronos en modo Administrador (`/#admin` o `/admin`), escribe el nombre de tu empresa, pega la URL y presiona **Generar Acceso**.
    * Presiona **Probar conexión** para verificar que se inserte una fila de prueba en tu hoja, e imprime el **Cartel QR** o comparte el **Magic Link por WhatsApp** con tu equipo.
 
-### Código de Google Apps Script (`backend/Code.gs`)
+### Diseño Automático y Sello Criptográfico en Google Sheets (`backend/Code.gs`)
 
-```javascript
-function doPost(e) {
-  try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = spreadsheet.getActiveSheet();
-    
-    // Si la hoja está vacía, crear encabezados automáticamente
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "Fecha y Hora (Local)",
-        "Timestamp (UTC)",
-        "Zona Horaria",
-        "Trabajador",
-        "Tipo de Registro",
-        "Mapa (Ubicación)",
-        "Precisión GPS (metros)",
-        "Coordenadas"
-      ]);
-      sheet.getRange(1, 1, 1, 8).setFontWeight("bold");
-    }
+El código completo del conector se encuentra en [`backend/Code.gs`](./backend/Code.gs) y también cuenta con botón **Copiar código** dentro del Panel de Administrador (`/admin`). Desde el **primer registro**, configura automáticamente la hoja `Registros de Asistencia`:
 
-    const data = JSON.parse(e.postData.contents);
-    
-    // La hora se genera en el servidor de Google (inmune a cambios de hora en el celular)
-    const now = new Date();
-    const utcTime = now.toISOString();
-    
-    // Toma dinámicamente la zona horaria configurada en el archivo de Google Sheets
-    const sheetTimeZone = spreadsheet.getSpreadsheetTimeZone();
-    const localTime = Utilities.formatDate(now, sheetTimeZone, "yyyy-MM-dd HH:mm:ss");
-    
-    const coords = `${data.lat},${data.lng}`;
-    const mapsUrl = `https://www.google.com/maps?q=${coords}`;
-    
-    sheet.appendRow([
-      localTime,
-      utcTime,
-      sheetTimeZone,
-      data.workerName || "Sin nombre",
-      data.type || "REGISTRO",
-      mapsUrl,
-      Math.round(data.accuracy || 0),
-      coords
-    ]);
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "ok",
-      localTime: localTime,
-      utcTime: utcTime,
-      timeZone: sheetTimeZone
-    })).setMimeType(ContentService.MimeType.JSON);
-    
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-```
+* **Privacidad de la hoja:** Tu archivo de Google Sheets permanece **100% privado** en tu Google Drive; `"Cualquier usuario"` únicamente habilita el envío al webhook `doPost`, sin dar permiso de lectura ni escritura directa sobre el archivo.
+* **Diseño visual automático:** Encabezado oscuro congelado (`42 px`), filtros activos, anchos de columna holgados, filas de `34 px` con bandas alternadas, etiquetas de color automáticas (`ENTRADA` en verde, `SALIDA` en azul, `PRUEBA` en ámbar), precisión formateada en metros (`15 m`) y enlace limpio **`📍 Abrir en Maps`**.
+* **Sello Criptográfico Encadenado (`HMAC-SHA256`):** Cada fila se firma en el servidor con una llave secreta privada guardada en `PropertiesService` (invisible desde la hoja), encadenando el número consecutivo y el sello de la fila anterior (`🔒 CRN-0001-...`).
+  * **Detección inmediata (`onEdit`):** Si alguien con acceso al archivo edita manualmente cualquier celda, el sello se marca en **rojo** al instante con una alerta.
+  * **Menú `🛡️ Cronos` en Google Sheets:** Permite ejecutar en un clic **🔍 Auditar autenticidad de registros (HMAC)** (detecta celdas editadas, filas escritas a mano o filas eliminadas) y **🎨 Reaplicar diseño y formato visual**.
 
 ---
 

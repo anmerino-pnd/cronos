@@ -74,7 +74,7 @@ function cacheElements() {
     // Modals & Toast
     'modal-success', 'success-banner', 'success-stamp', 'success-time-big',
     'success-headline', 'success-worker', 'success-org', 'success-server-time',
-    'success-timezone', 'success-accuracy', 'btn-close-success',
+    'success-timezone', 'success-accuracy', 'success-seal-row', 'success-seal', 'btn-close-success',
     'modal-confirm-repeat', 'repeat-message', 'btn-confirm-repeat-yes', 'btn-confirm-repeat-no',
     'modal-account', 'account-modal-sub', 'btn-change-worker', 'desc-change-worker',
     'btn-unlink-company', 'title-unlink-company', 'desc-unlink-company', 'btn-close-account',
@@ -908,7 +908,8 @@ async function executePunch(type) {
       orgName: config.orgName,
       localTime: result.localTime,
       timeZone: result.timeZone || 'Local',
-      accuracy
+      accuracy,
+      seal: result.seal || ''
     });
   } catch (netErr) {
     setPunchButtonsDisabled(false);
@@ -920,7 +921,7 @@ async function executePunch(type) {
   }
 }
 
-function showSuccessReceiptModal({ type, workerName, orgName, localTime, timeZone, accuracy }) {
+function showSuccessReceiptModal({ type, workerName, orgName, localTime, timeZone, accuracy, seal }) {
   const isEntrada = type === 'ENTRADA';
   const parts = formatServerTimeParts(localTime);
 
@@ -936,6 +937,13 @@ function showSuccessReceiptModal({ type, workerName, orgName, localTime, timeZon
   el['success-server-time'].textContent = localTime;
   el['success-timezone'].textContent = timeZone;
   el['success-accuracy'].textContent = `±${Math.round(accuracy)} m`;
+
+  if (seal) {
+    el['success-seal'].textContent = seal;
+    el['success-seal-row'].hidden = false;
+  } else {
+    el['success-seal-row'].hidden = true;
+  }
 
   openModal('modal-success', 'btn-close-success');
 }
@@ -1067,8 +1075,9 @@ async function handleAdminTestConnection() {
     });
 
     out.className = 'alert alert-success';
+    const sealInfo = result.seal ? ` · Sello: ${result.seal}` : '';
     out.textContent =
-      `¡Conexión exitosa! Se insertó una fila de prueba en tu Google Sheets. Hora oficial: ${result.localTime} (${result.timeZone || 'Zona local'}).`;
+      `¡Conexión exitosa! Se insertó una fila de prueba con formato automático en tu Google Sheets. Hora oficial: ${result.localTime} (${result.timeZone || 'Zona local'})${sealInfo}.`;
   } catch (err) {
     out.className = 'alert alert-error';
     out.textContent =

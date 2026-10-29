@@ -398,6 +398,12 @@
               <div style="margin-top: 0.55rem;">
                 Al finalizar, copia la <strong>URL de la aplicación web</strong> (termina en <code>/exec</code>) y pégala en el formulario de abajo.
               </div>
+              <div class="deploy-fields-box" style="margin-top: 0.65rem; background-color: #ECFDF5; border-color: #A7F3D0; color: #064E3B;">
+                <div>
+                  <strong>Privacidad, diseño automático y sello criptográfico incluidos:</strong>
+                  tu archivo de Google Sheets sigue siendo <strong>100% privado</strong> (los trabajadores nunca pueden verlo ni abrirlo). Desde el primer registro, el script formatea automáticamente la hoja y firma cada fila con un sello encadenado <code>HMAC-SHA256</code> que detecta en rojo cualquier edición manual (puedes auditarlo en cualquier momento desde el menú <strong>&#128737;&#65039; Cronos</strong> arriba en tu Google Sheets).
+                </div>
+              </div>
             </li>
           </ol>
         </div>
@@ -548,6 +554,10 @@
         <div class="receipt-row">
           <span class="receipt-row-label">Precisión GPS</span>
           <span class="receipt-row-val" id="success-accuracy">—</span>
+        </div>
+        <div class="receipt-row" id="success-seal-row" hidden>
+          <span class="receipt-row-label">Sello HMAC</span>
+          <span class="receipt-row-val" id="success-seal">—</span>
         </div>
       </div>
 
