@@ -27,6 +27,7 @@ const MONTHS_SHORT_ES = [
 // Application Runtime State
 const state = {
   currentView: null, // 'welcome' | 'register' | 'checador' | 'admin'
+  quickSwitchMode: false, // true when active worker taps "Cambiar QR / Hoja" to switch sheet keeping their name
   pendingCompany: null, // { scriptId, orgName, isNameChange: boolean }
   lastAttemptedPunchType: null, // 'ENTRADA' | 'SALIDA'
   pendingRepeatType: null,
@@ -48,15 +49,17 @@ function cacheElements() {
     'app-main', 'brand-link', 'topbar-mode-tag',
     'btn-go-admin', 'btn-exit-admin', 'btn-worker-menu', 'offline-banner',
     // View 1: Welcome
-    'view-welcome', 'welcome-error', 'btn-open-scanner', 'scanner-panel',
+    'view-welcome', 'welcome-eyebrow', 'welcome-heading', 'welcome-lead',
+    'welcome-error', 'btn-open-scanner', 'label-open-scanner', 'scanner-panel',
     'qr-reader', 'scanner-status-msg', 'qr-file-input', 'btn-close-scanner',
     'form-paste-invite', 'input-invite-code', 'btn-paste-clipboard',
+    'btn-cancel-quick-switch',
     // View 2: Register
     'view-register', 'register-kicker', 'register-org-name',
     'register-switch-notice', 'register-error', 'form-worker-register',
     'input-worker-name', 'input-privacy-accept', 'btn-save-worker', 'btn-cancel-register',
     // View 3: Checador
-    'view-checador', 'checador-org-name', 'checador-worker-name',
+    'view-checador', 'checador-org-name', 'checador-worker-name', 'btn-card-options',
     'live-clock-time', 'live-clock-date', 'btn-punch-in', 'btn-punch-out',
     'punch-loading-box', 'punch-loading-title', 'punch-loading-sub',
     'punch-error-box', 'punch-error-title', 'punch-error-desc', 'punch-error-steps',
@@ -76,7 +79,8 @@ function cacheElements() {
     'success-headline', 'success-worker', 'success-org', 'success-server-time',
     'success-timezone', 'success-accuracy', 'success-seal-row', 'success-seal', 'btn-close-success',
     'modal-confirm-repeat', 'repeat-message', 'btn-confirm-repeat-yes', 'btn-confirm-repeat-no',
-    'modal-account', 'account-modal-sub', 'btn-change-worker', 'desc-change-worker',
+    'modal-account', 'account-modal-sub', 'btn-switch-qr', 'desc-switch-qr',
+    'btn-change-worker', 'desc-change-worker',
     'btn-unlink-company', 'title-unlink-company', 'desc-unlink-company', 'btn-close-account',
     'app-toast'
   ];
@@ -263,13 +267,19 @@ async function switchView(viewName) {
   el['topbar-mode-tag'].textContent = isAdmin ? 'ADMIN' : 'CHECADOR';
   el['topbar-mode-tag'].classList.toggle('is-admin', isAdmin);
 
-  // Admin shortcut ONLY shown on unconfigured welcome screen (hidden for active workers)
-  el['btn-go-admin'].hidden = viewName !== 'welcome';
+  // Admin shortcut ONLY shown on unconfigured welcome screen (hidden for active workers & quick-switch)
+  const isQuickSwitch = viewName === 'welcome' && state.quickSwitchMode && !!loadConfig();
+  el['btn-go-admin'].hidden = viewName !== 'welcome' || isQuickSwitch;
   el['btn-exit-admin'].hidden = viewName !== 'admin';
   el['btn-worker-menu'].hidden = viewName !== 'checador';
 
+  if (viewName === 'welcome') {
+    renderWelcomeView();
+  }
+
   // Live clock only runs while on Checador view
   if (viewName === 'checador') {
+    state.quickSwitchMode = false;
     startLiveClock();
     renderChecadorView();
   } else {
@@ -327,8 +337,66 @@ function routeFromCurrentState() {
 }
 
 /* ==========================================================================
-   View 1: Welcome — QR Scanner (Lazy-Loaded) & Paste Invite
+   View 1: Welcome — QR Scanner (Lazy-Loaded), Paste Invite & 1-Step QR Switch
    ========================================================================== */
+
+function renderWelcomeView() {
+  const existing = loadConfig();
+  const isQuickSwitch = state.quickSwitchMode && !!existing;
+
+  showWelcomeError('');
+
+  if (isQuickSwitch) {
+    el['welcome-eyebrow'].textContent = 'Cambio de hoja · Conservando tu nombre';
+    el['welcome-heading'].textContent = 'Vincular nuevo QR o enlace';
+    el['welcome-lead'].textContent =
+      `Escanea el nuevo código QR o pega el nuevo enlace de WhatsApp (por ejemplo, nueva hoja anual o sucursal). Seguirás registrado como "${existing.workerName}".`;
+    el['label-open-scanner'].textContent = 'Escanear nuevo código QR';
+    el['btn-cancel-quick-switch'].hidden = false;
+  } else {
+    el['welcome-eyebrow'].textContent = 'Vinculación de trabajador';
+    el['welcome-heading'].textContent = 'Conecta con tu empresa';
+    el['welcome-lead'].textContent =
+      'Escanea el código QR de tu lugar de trabajo o pega el enlace de invitación recibido por WhatsApp.';
+    el['label-open-scanner'].textContent = 'Escanear QR de mi empresa';
+    el['btn-cancel-quick-switch'].hidden = true;
+  }
+}
+
+/**
+ * Applies a decoded company invite. If the worker launched "Cambiar QR / Hoja"
+ * (`state.quickSwitchMode`), switches the linked Google Sheet in 1 step while
+ * preserving their saved worker name and privacy consent without re-typing.
+ */
+function applyDecodedInvite({ scriptId, orgName }) {
+  const existing = loadConfig();
+
+  if (state.quickSwitchMode && existing) {
+    const isSameSheet = existing.scriptId === scriptId;
+    const updatedConfig = {
+      scriptId,
+      orgName,
+      workerName: existing.workerName,
+      privacyAccepted: true,
+      configuredAt: new Date().toISOString()
+    };
+    saveConfig(updatedConfig);
+    if (!isSameSheet) {
+      localStorage.removeItem(STORAGE_LAST_CHECKIN_KEY);
+    }
+    state.quickSwitchMode = false;
+    cleanJoinQueryFromUrl();
+    switchView('checador');
+    showToast(`Conectado a "${orgName}" como ${existing.workerName}`, 3400);
+    return;
+  }
+
+  openRegistrationForCompany({
+    scriptId,
+    orgName,
+    isNameChange: false
+  });
+}
 
 function showWelcomeError(msg) {
   if (!msg) {
@@ -401,10 +469,9 @@ async function startQrScanner() {
       }
       if (navigator.vibrate) navigator.vibrate(60);
       await stopQrScanner();
-      openRegistrationForCompany({
+      applyDecodedInvite({
         scriptId: parsed.scriptId,
-        orgName: parsed.orgName,
-        isNameChange: false
+        orgName: parsed.orgName
       });
     };
 
@@ -474,10 +541,9 @@ async function handleQrImageUpload(event) {
       return;
     }
 
-    openRegistrationForCompany({
+    applyDecodedInvite({
       scriptId: parsed.scriptId,
-      orgName: parsed.orgName,
-      isNameChange: false
+      orgName: parsed.orgName
     });
   } catch {
     showWelcomeError('No se detectó un código QR legible en la imagen seleccionada.');
@@ -513,7 +579,7 @@ function openRegistrationForCompany({ scriptId, orgName, isNameChange = false })
     el['input-privacy-accept'].checked = true;
   } else if (existing && existing.workerName) {
     el['input-worker-name'].value = existing.workerName;
-    el['input-privacy-accept'].checked = false;
+    el['input-privacy-accept'].checked = existing.privacyAccepted === true;
   } else {
     el['input-worker-name'].value = '';
     el['input-privacy-accept'].checked = false;
@@ -1091,16 +1157,25 @@ async function handleAdminTestConnection() {
 }
 
 /* ==========================================================================
-   Modals & Account Menu ("Cambiar usuario / Salir")
+   Modals & Account Menu (1-Step QR Switch, Edit Name & Reassuring Unlink)
    ========================================================================== */
+
+function syncBodyModalLock() {
+  const anyOpen = ['modal-success', 'modal-confirm-repeat', 'modal-account'].some(
+    (id) => el[id] && !el[id].hidden
+  );
+  document.body.classList.toggle('modal-open', anyOpen);
+}
 
 function openModal(modalId, focusId) {
   const modal = el[modalId];
   if (!modal) return;
   if (el['app-toast']) el['app-toast'].hidden = true;
   modal.hidden = false;
+  modal.scrollTop = 0;
+  syncBodyModalLock();
   if (focusId && el[focusId]) {
-    setTimeout(() => el[focusId].focus(), 30);
+    setTimeout(() => el[focusId].focus({ preventScroll: true }), 30);
   }
 }
 
@@ -1108,6 +1183,7 @@ function closeModal(modalId) {
   const modal = el[modalId];
   if (!modal) return;
   modal.hidden = true;
+  syncBodyModalLock();
   if (modalId === 'modal-account') {
     resetUnlinkConfirmationState();
   }
@@ -1115,9 +1191,10 @@ function closeModal(modalId) {
 
 function resetUnlinkConfirmationState() {
   state.unlinkConfirmArmed = false;
-  el['title-unlink-company'].textContent = 'Desvincular empresa';
+  el['btn-unlink-company'].classList.remove('is-armed');
+  el['title-unlink-company'].textContent = 'Salir / Desvincular este celular';
   el['desc-unlink-company'].textContent =
-    'Borra toda la configuración guardada. Necesitarás escanear el código QR o abrir el enlace de invitación otra vez.';
+    'Cierra la sesión en este teléfono sin afectar tus asistencias ya enviadas. Puedes volver a escanear este o cualquier otro QR cuando quieras.';
 }
 
 function openAccountModal() {
@@ -1125,11 +1202,13 @@ function openAccountModal() {
   if (!config) return;
 
   resetUnlinkConfirmationState();
-  el['account-modal-sub'].textContent = `${config.workerName} · ${config.orgName}`;
+  el['account-modal-sub'].textContent = `Activo: ${config.workerName} · ${config.orgName}`;
+  el['desc-switch-qr'].textContent =
+    `Escanea otro QR o pega un nuevo enlace (ej. nueva hoja anual o sucursal) conservando tu nombre "${config.workerName}" en un solo paso.`;
   el['desc-change-worker'].textContent =
-    `Mantiene el vínculo con "${config.orgName}". Útil para corregir tu nombre o si otro compañero usará este teléfono.`;
+    `Corrige cómo aparece tu nombre o cámbialo si otro compañero usará este teléfono en "${config.orgName}".`;
 
-  openModal('modal-account', 'btn-change-worker');
+  openModal('modal-account', 'btn-switch-qr');
 }
 
 /* ==========================================================================
@@ -1210,6 +1289,10 @@ function bindEvents() {
     openAccountModal();
   });
 
+  el['btn-card-options'].addEventListener('click', () => {
+    openAccountModal();
+  });
+
   window.addEventListener('hashchange', () => {
     routeFromCurrentState();
   });
@@ -1266,11 +1349,19 @@ function bindEvents() {
       return;
     }
     el['input-invite-code'].value = '';
-    openRegistrationForCompany({
+    applyDecodedInvite({
       scriptId: decoded.scriptId,
-      orgName: decoded.orgName,
-      isNameChange: false
+      orgName: decoded.orgName
     });
+  });
+
+  el['btn-cancel-quick-switch'].addEventListener('click', () => {
+    state.quickSwitchMode = false;
+    if (loadConfig()) {
+      switchView('checador');
+    } else {
+      renderWelcomeView();
+    }
   });
 
   // View 2: Worker Registration
@@ -1391,7 +1482,19 @@ function bindEvents() {
     closeModal('modal-confirm-repeat');
   });
 
-  // Modal 3: Account Menu (Change Worker Name vs Full Unlink)
+  // Modal 3: Account Menu (1-Step QR Switch, Edit Worker Name, Reassuring Unlink)
+  el['btn-switch-qr'].addEventListener('click', () => {
+    const config = loadConfig();
+    closeModal('modal-account');
+    if (!config) {
+      state.quickSwitchMode = false;
+      switchView('welcome');
+      return;
+    }
+    state.quickSwitchMode = true;
+    switchView('welcome');
+  });
+
   el['btn-change-worker'].addEventListener('click', () => {
     const config = loadConfig();
     closeModal('modal-account');
@@ -1409,14 +1512,16 @@ function bindEvents() {
   el['btn-unlink-company'].addEventListener('click', () => {
     if (!state.unlinkConfirmArmed) {
       state.unlinkConfirmArmed = true;
-      el['title-unlink-company'].textContent = '¿Confirmar desvinculación? Toca de nuevo';
+      el['btn-unlink-company'].classList.add('is-armed');
+      el['title-unlink-company'].textContent = 'Toca de nuevo para confirmar y salir';
       el['desc-unlink-company'].textContent =
-        'Se borrarán empresa y trabajador de este teléfono de forma inmediata.';
+        'Volverás a la pantalla inicial lista para escanear cualquier código QR o enlace.';
       return;
     }
+    state.quickSwitchMode = false;
     clearAllWorkerData();
     closeModal('modal-account');
-    showToast('Empresa desvinculada de este dispositivo');
+    showToast('Sesión cerrada. Puedes vincular un nuevo QR cuando gustes.');
     switchView('welcome');
   });
 

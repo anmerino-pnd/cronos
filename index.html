@@ -57,10 +57,12 @@
         <!-- Visible only on Daily Worker Checador view -->
         <button type="button" class="btn-topbar" id="btn-worker-menu" hidden>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-            <circle cx="12" cy="7" r="4"></circle>
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
           </svg>
-          <span>Cambiar usuario / Salir</span>
+          <span>Cambiar QR / Opciones</span>
         </button>
       </div>
     </div>
@@ -79,9 +81,9 @@
          =================================================================== -->
     <section class="card" id="view-welcome" aria-labelledby="welcome-heading" hidden>
       <div class="card-body">
-        <span class="eyebrow">Vinculación de trabajador</span>
+        <span class="eyebrow" id="welcome-eyebrow">Vinculación de trabajador</span>
         <h1 class="view-title" id="welcome-heading">Conecta con tu empresa</h1>
-        <p class="view-lead" style="margin-bottom: 1.25rem;">
+        <p class="view-lead" id="welcome-lead" style="margin-bottom: 1.25rem;">
           Escanea el código QR de tu lugar de trabajo o pega el enlace de invitación recibido por WhatsApp.
         </p>
 
@@ -94,7 +96,7 @@
             <rect x="14" y="14" width="7" height="7"></rect>
             <rect x="3" y="14" width="7" height="7"></rect>
           </svg>
-          <span>Escanear QR de mi empresa</span>
+          <span id="label-open-scanner">Escanear QR de mi empresa</span>
         </button>
 
         <!-- Lazy-loaded Camera QR Scanner Panel -->
@@ -138,6 +140,10 @@
             Continuar con código
           </button>
         </form>
+
+        <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-quick-switch" style="margin-top: 0.75rem;" hidden>
+          ← Cancelar y volver a mi checador actual
+        </button>
       </div>
     </section>
 
@@ -193,13 +199,20 @@
     <section class="card" id="view-checador" aria-label="Checador de asistencia" hidden>
       <!-- Worker & Company Credential Header -->
       <div class="timecard-header">
-        <div>
+        <div class="timecard-identity">
           <span class="worker-org-badge">
             <span class="status-dot" aria-hidden="true"></span>
             <span id="checador-org-name">—</span>
           </span>
           <h1 class="worker-display-name" id="checador-worker-name">—</h1>
         </div>
+        <button type="button" class="btn-card-options" id="btn-card-options" aria-label="Abrir opciones de hoja o trabajador">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>Opciones</span>
+        </button>
       </div>
 
       <!-- Reference Clock Strip -->
@@ -591,29 +604,39 @@
   </div>
 
   <!-- =====================================================================
-       MODAL 3: CAMBIAR USUARIO / SALIR (Two Distinct Options)
+       MODAL 3: OPCIONES DE HOJA Y USUARIO (1-Step QR Switch, Edit Name, Unlink)
        ===================================================================== -->
   <div class="modal-backdrop" id="modal-account" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" hidden>
     <div class="modal-card">
       <div class="card-body" style="padding-bottom: 0.75rem;">
-        <span class="eyebrow">Sesión en este dispositivo</span>
-        <h2 class="view-title" id="account-modal-title" style="font-size: 1.25rem; margin-bottom: 0.25rem;">
-          Opciones de usuario
+        <span class="eyebrow">Ajustes de este celular</span>
+        <h2 class="view-title" id="account-modal-title" style="font-size: 1.22rem; margin-bottom: 0.2rem;">
+          Opciones de hoja y usuario
         </h2>
-        <p class="view-lead" id="account-modal-sub" style="font-size: 0.88rem; margin-bottom: 1rem;"></p>
+        <p class="view-lead" id="account-modal-sub" style="font-size: 0.87rem; margin-bottom: 0.95rem;"></p>
 
-        <div style="display: flex; flex-direction: column; gap: 0.7rem;">
-          <button type="button" class="option-card-btn" id="btn-change-worker">
-            <span class="option-card-title">Cambiar nombre / trabajador</span>
-            <span class="option-card-desc" id="desc-change-worker">
-              Mantiene la empresa vinculada. Útil para corregir tu nombre o si otro compañero usará este teléfono.
+        <div style="display: flex; flex-direction: column; gap: 0.65rem;">
+          <button type="button" class="option-card-btn is-featured" id="btn-switch-qr">
+            <span class="option-card-head">
+              <span class="option-card-title">Cambiar QR / Hoja de asistencia</span>
+              <span class="option-pill">Conserva tu nombre</span>
+            </span>
+            <span class="option-card-desc" id="desc-switch-qr">
+              Escanea otro QR o pega un nuevo enlace (ej. cambio de año o nueva hoja de tu empresa) sin volver a escribir tu nombre.
             </span>
           </button>
 
-          <button type="button" class="option-card-btn is-danger" id="btn-unlink-company">
-            <span class="option-card-title" id="title-unlink-company">Desvincular empresa</span>
+          <button type="button" class="option-card-btn" id="btn-change-worker">
+            <span class="option-card-title">Editar mi nombre</span>
+            <span class="option-card-desc" id="desc-change-worker">
+              Corrige cómo aparece tu nombre o cámbialo si otro compañero usará este teléfono en la misma hoja.
+            </span>
+          </button>
+
+          <button type="button" class="option-card-btn" id="btn-unlink-company">
+            <span class="option-card-title" id="title-unlink-company">Salir / Desvincular este celular</span>
             <span class="option-card-desc" id="desc-unlink-company">
-              Borra toda la configuración guardada. Necesitarás escanear el código QR o abrir el enlace de invitación otra vez.
+              Cierra la sesión en este teléfono sin afectar tus asistencias ya enviadas. Puedes volver a escanear este o cualquier otro QR cuando quieras.
             </span>
           </button>
         </div>
@@ -621,7 +644,7 @@
 
       <div class="modal-footer" style="padding-top: 0.5rem;">
         <button type="button" class="btn btn-secondary btn-block" id="btn-close-account">
-          Cancelar
+          Cerrar menú
         </button>
       </div>
     </div>

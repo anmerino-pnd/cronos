@@ -58,7 +58,10 @@ El código completo del conector se encuentra en [`backend/Code.gs`](./backend/C
 1. **Vinculación única:** El trabajador abre el **Magic Link** enviado por WhatsApp o escanea el **Código QR** de la empresa (funciona tanto desde la cámara nativa del celular como desde el lector integrado en Cronos).
 2. **Registro local:** Ingresa su nombre completo y acepta el aviso de privacidad (la ubicación GPS se consulta **únicamente** al presionar *Registrar Entrada* o *Registrar Salida*, nunca en segundo plano).
 3. **Uso diario:** Dos botones táctiles de alto contraste (**REGISTRAR ENTRADA** y **REGISTRAR SALIDA**) con protección contra doble toque accidental (< 5 min), GPS obligatorio y recibo visual con la **hora oficial del servidor de Google**.
-4. **Cambio de usuario o salida:** El menú *Cambiar usuario / Salir* permite **cambiar únicamente el nombre del trabajador** (conservando la empresa vinculada, ideal para corregir errores o compartir teléfono) o **desvincular la empresa** por completo.
+4. **Opciones de hoja y usuario:** Desde el botón **Opciones** en la tarjeta del trabajador (o **Cambiar QR / Opciones** arriba) el usuario puede:
+   * **Cambiar QR / Hoja de asistencia (en 1 paso):** Escanea un nuevo QR o pega un nuevo enlace (ideal al cambiar de archivo anual como *Asistencia 2026* → *Asistencia 2027* o de sucursal) **conservando su nombre automáticamente** sin volver a escribirlo.
+   * **Editar mi nombre:** Corrige su nombre o lo cambia si otro compañero comparte el teléfono.
+   * **Salir / Desvincular este celular:** Limpia el dispositivo sin afectar las asistencias ya enviadas, permitiendo vincular otro QR en cualquier momento.
 
 ---
 
