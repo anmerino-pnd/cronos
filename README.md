@@ -40,15 +40,16 @@ También puedes seguir esta misma guía interactiva directamente desde el **Pane
    * Abre Cronos en modo Administrador (`/#admin` o `/admin`), escribe el nombre de tu empresa, pega la URL y presiona **Generar Acceso**.
    * Presiona **Probar conexión** para verificar que se inserte una fila de prueba en tu hoja, e imprime el **Cartel QR** o comparte el **Magic Link por WhatsApp** con tu equipo.
 
-### Diseño Automático y Sello Criptográfico en Google Sheets (`backend/Code.gs`)
+### Pestañas Mensuales, Diseño Automático y Sello Criptográfico (`backend/Code.gs`)
 
-El código completo del conector se encuentra en [`backend/Code.gs`](./backend/Code.gs) y también cuenta con botón **Copiar código** dentro del Panel de Administrador (`/admin`). Desde el **primer registro**, configura automáticamente la hoja `Registros de Asistencia`:
+El código completo del conector se encuentra en [`backend/Code.gs`](./backend/Code.gs) y también cuenta con botón **Copiar código** dentro del Panel de Administrador (`/admin`). Desde el **primer registro**, configura automáticamente tu libro de Google Sheets:
 
 * **Privacidad de la hoja:** Tu archivo de Google Sheets permanece **100% privado** en tu Google Drive; `"Cualquier usuario"` únicamente habilita el envío al webhook `doPost`, sin dar permiso de lectura ni escritura directa sobre el archivo.
+* **Organización automática por mes:** Cada registro se guarda en la pestaña del mes correspondiente según la hora oficial y zona horaria del Sheets (ej. `Octubre 2026`, `Noviembre 2026`...). Al iniciar un nuevo mes, en la primera marca recibida a partir del día 1 a las `00:00:00`, el script crea automáticamente la pestaña del nuevo mes y la coloca **al inicio (primera a la izquierda)** con pestaña en verde esmeralda (atenuando los meses anteriores a gris pizarra).
 * **Diseño visual automático:** Encabezado oscuro congelado (`42 px`), filtros activos, anchos de columna holgados, filas de `34 px` con bandas alternadas, etiquetas de color automáticas (`ENTRADA` en verde, `SALIDA` en azul, `PRUEBA` en ámbar), precisión formateada en metros (`15 m`) y enlace limpio **`📍 Abrir en Maps`**.
-* **Sello Criptográfico Encadenado (`HMAC-SHA256`):** Cada fila se firma en el servidor con una llave secreta privada guardada en `PropertiesService` (invisible desde la hoja), encadenando el número consecutivo y el sello de la fila anterior (`🔒 CRN-0001-...`).
-  * **Detección inmediata (`onEdit`):** Si alguien con acceso al archivo edita manualmente cualquier celda, el sello se marca en **rojo** al instante con una alerta.
-  * **Menú `🛡️ Cronos` en Google Sheets:** Permite ejecutar en un clic **🔍 Auditar autenticidad de registros (HMAC)** (detecta celdas editadas, filas escritas a mano o filas eliminadas) y **🎨 Reaplicar diseño y formato visual**.
+* **Sello Criptográfico Encadenado por Mes (`HMAC-SHA256`):** Cada fila se firma en el servidor con una llave secreta privada guardada en `PropertiesService` (invisible desde la hoja), incluyendo año-mes, folio consecutivo y el sello de la fila anterior (`🔒 CRN-202611-0001-...`).
+  * **Detección inmediata (`onEdit`):** Si alguien con acceso al archivo edita manualmente cualquier celda o mueve filas entre meses, el sello se marca en **rojo** al instante con una alerta.
+  * **Menú `🛡️ Cronos` en Google Sheets:** Permite ejecutar **🔍 Auditar pestaña actual (HMAC)**, **🗂️ Auditar todos los meses** y **🎨 Reaplicar diseño visual a esta pestaña**.
 
 ---
 

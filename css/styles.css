@@ -1286,6 +1286,12 @@ textarea {
   font-size: 0.83rem;
 }
 
+#success-seal {
+  font-size: 0.73rem;
+  letter-spacing: -0.02em;
+  word-break: break-all;
+}
+
 .modal-footer {
   padding: 1.1rem 1.35rem;
   display: flex;

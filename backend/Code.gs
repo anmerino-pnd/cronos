@@ -1,13 +1,20 @@
 /**
  * ============================================================================
  * CRONOS · Conector Serverless para Google Sheets
+ * - Creación automática de pestaña por mes ("Octubre 2026", "Noviembre 2026"...)
+ *   colocando siempre el mes en curso como primera pestaña a la izquierda
  * - Diseño ejecutivo automático desde el primer registro (columnas, colores, links)
- * - Sello criptográfico encadenado (HMAC-SHA256) contra ediciones manuales
- * - Detección en tiempo real (onEdit) y auditoría completa desde menú "Cronos"
+ * - Sello criptográfico encadenado por mes (HMAC-SHA256) contra ediciones manuales
+ * - Detección en tiempo real (onEdit) y auditoría por hoja o global desde menú "Cronos"
  * ============================================================================
  */
 
-const CRONOS_SHEET_NAME = "Registros de Asistencia";
+const CRONOS_LEGACY_SHEET_NAME = "Registros de Asistencia";
+
+const CRONOS_MESES_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
 
 const CRONOS_HEADERS = [
   "Fecha y Hora (Local)",
@@ -30,17 +37,19 @@ const CRONOS_COL_WIDTHS = [
   195, // F: Coordenadas
   165, // G: Zona Horaria
   205, // H: Timestamp (UTC)
-  245  // I: Sello Criptográfico (HMAC)
+  275  // I: Sello Criptográfico (HMAC)
 ];
 
 /**
- * Crea el menú superior "Cronos" al abrir el archivo en Google Sheets.
+ * Crea el menú superior "🛡️ Cronos" al abrir el archivo en Google Sheets.
  */
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("🛡️ Cronos")
-    .addItem("🔍 Auditar autenticidad de registros (HMAC)", "verificarIntegridadCronos")
-    .addItem("🎨 Reaplicar diseño y formato visual", "reaplicarDisenoCronos")
+    .addItem("🔍 Auditar pestaña actual (HMAC)", "verificarIntegridadCronos")
+    .addItem("🗂️ Auditar todos los meses", "verificarTodosLosMesesCronos")
+    .addSeparator()
+    .addItem("🎨 Reaplicar diseño visual a esta pestaña", "reaplicarDisenoCronos")
     .addToUi();
 }
 
@@ -53,11 +62,6 @@ function doPost(e) {
 
   try {
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = obtenerHojaCronos_(spreadsheet);
-    const secret = obtenerSecretoHmac_();
-    const props = PropertiesService.getScriptProperties();
-    const headKey = "CRONOS_CHAIN_HEAD_" + sheet.getSheetId();
-
     const data = JSON.parse(e.postData.contents);
 
     // Hora oficial generada en los servidores de Google (inmune al reloj del celular)
@@ -65,6 +69,14 @@ function doPost(e) {
     const utcTime = now.toISOString();
     const sheetTimeZone = spreadsheet.getSpreadsheetTimeZone();
     const localTime = Utilities.formatDate(now, sheetTimeZone, "yyyy-MM-dd HH:mm:ss");
+
+    // Resolver (o crear automáticamente al cambiar de mes) la pestaña del mes actual
+    const infoMes = resolverInfoMesDesdeFechaLocal_(localTime);
+    const sheet = obtenerHojaMensualCronos_(spreadsheet, infoMes.nombreHoja);
+
+    const secret = obtenerSecretoHmac_();
+    const props = PropertiesService.getScriptProperties();
+    const headKey = "CRONOS_CHAIN_HEAD_" + sheet.getSheetId();
 
     const workerName = String(data.workerName || "Sin nombre").trim();
     const type = String(data.type || "REGISTRO").trim().toUpperCase();
@@ -74,18 +86,19 @@ function doPost(e) {
     const coords = lat + "," + lng;
     const mapsUrl = "https://www.google.com/maps?q=" + coords;
 
-    // Determinar secuencia y sello de la fila anterior para encadenar registros
+    // Determinar secuencia y sello de la fila anterior dentro de la hoja del mes
     const lastRow = sheet.getLastRow();
     let seq = 1;
-    let prevSeal = "GENESIS";
+    let prevSeal = "GENESIS-" + infoMes.ymCodigo;
 
     if (lastRow >= 2) {
-      seq = lastRow; // Fila 2 = registro #1, Fila 3 = registro #2...
+      seq = lastRow; // Fila 2 = registro #1 del mes, Fila 3 = registro #2...
       const prevCellVal = sheet.getRange(lastRow, 9).getValue();
       prevSeal = extraerCodigoSello_(prevCellVal) || "SIN_SELLO";
     }
 
     const seal = calcularSelloFila_(
+      infoMes.ymCodigo,
       seq,
       prevSeal,
       {
@@ -131,14 +144,18 @@ function doPost(e) {
     // Aplicar estilo espacioso a la nueva fila
     estilizarFilaRegistro_(sheet, nextRow);
 
-    // Guardar puntero oficial de cadena para detectar si borran filas al final
-    props.setProperty(headKey, JSON.stringify({ count: seq, lastSeal: seal }));
+    // Guardar puntero oficial de cadena del mes para detectar si borran filas al final
+    props.setProperty(
+      headKey,
+      JSON.stringify({ ym: infoMes.ymCodigo, sheetName: infoMes.nombreHoja, count: seq, lastSeal: seal })
+    );
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "ok",
       localTime: localTime,
       utcTime: utcTime,
       timeZone: sheetTimeZone,
+      sheetName: infoMes.nombreHoja,
       seal: seal
     })).setMimeType(ContentService.MimeType.JSON);
 
@@ -160,9 +177,7 @@ function onEdit(e) {
   try {
     if (!e || !e.range) return;
     const sheet = e.range.getSheet();
-    if (sheet.getLastColumn() < 9) return;
-    const headerSeal = String(sheet.getRange(1, 9).getValue() || "");
-    if (headerSeal !== CRONOS_HEADERS[8]) return;
+    if (!esHojaCronos_(sheet)) return;
 
     const startRow = Math.max(2, e.range.getRow());
     const endRow = Math.min(sheet.getLastRow(), e.range.getLastRow());
@@ -171,7 +186,7 @@ function onEdit(e) {
     const resultado = auditarFilasInterno_(sheet, false);
     if (!resultado.ok) {
       e.source.toast(
-        "Se detectó una modificación manual. El sello criptográfico HMAC marcó en rojo las filas alteradas.",
+        'Se detectó una modificación manual en "' + sheet.getName() + '". El sello HMAC marcó en rojo las filas alteradas.',
         "⚠️ Cronos · Alerta de Integridad",
         8
       );
@@ -182,31 +197,45 @@ function onEdit(e) {
 }
 
 /**
- * Auditoría completa ejecutable desde el menú "🛡️ Cronos".
+ * Audita la pestaña activa actualmente abierta por el administrador.
  */
 function verificarIntegridadCronos() {
   const ui = SpreadsheetApp.getUi();
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = spreadsheet.getSheetByName(CRONOS_SHEET_NAME) || spreadsheet.getActiveSheet();
+  const sheet = spreadsheet.getActiveSheet();
+
+  if (!esHojaCronos_(sheet)) {
+    ui.alert(
+      "Cronos · Auditoría",
+      'La pestaña actual ("' + sheet.getName() + '") no es una hoja de registros de Cronos.\n\n' +
+      'Selecciona una pestaña mensual (ej. "Octubre 2026") o usa la opción "🗂️ Auditar todos los meses".',
+      ui.ButtonSet.OK
+    );
+    return;
+  }
 
   if (sheet.getLastRow() < 2) {
-    ui.alert("Cronos · Auditoría", "Aún no hay registros de asistencia para auditar en esta hoja.", ui.ButtonSet.OK);
+    ui.alert(
+      "Cronos · Auditoría",
+      'La pestaña "' + sheet.getName() + '" aún no tiene registros de asistencia para auditar.',
+      ui.ButtonSet.OK
+    );
     return;
   }
 
   const res = auditarFilasInterno_(sheet, true);
   if (res.ok) {
     ui.alert(
-      "✅ Integridad Verificada (100% Auténtico)",
-      "Se verificaron criptográficamente " + res.total + " registro(s).\n\n" +
+      "✅ Integridad Verificada · " + sheet.getName(),
+      "Se verificaron criptográficamente " + res.total + " registro(s) en \"" + sheet.getName() + "\".\n\n" +
       "Todos los sellos HMAC-SHA256 y el encadenamiento secuencial coinciden. " +
       "Ninguna fila ha sido escrita a mano, editada ni eliminada.",
       ui.ButtonSet.OK
     );
   } else {
     ui.alert(
-      "⚠️ Alteración Detectada en la Hoja",
-      "Se encontraron inconsistencias en la cadena criptográfica:\n\n" +
+      "⚠️ Alteración Detectada · " + sheet.getName(),
+      "Se encontraron inconsistencias en \"" + sheet.getName() + "\":\n\n" +
       res.errores.slice(0, 8).join("\n") +
       (res.errores.length > 8 ? "\n...y " + (res.errores.length - 8) + " más." : "") +
       "\n\nLas filas afectadas fueron marcadas en ROJO en la columna 'Sello Criptográfico (HMAC)'.",
@@ -216,48 +245,168 @@ function verificarIntegridadCronos() {
 }
 
 /**
- * Permite reaplicar anchos, alturas y diseño visual desde el menú superior.
+ * Audita TODAS las pestañas mensuales de Cronos existentes en el archivo.
+ */
+function verificarTodosLosMesesCronos() {
+  const ui = SpreadsheetApp.getUi();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = spreadsheet.getSheets().filter(esHojaCronos_);
+
+  if (sheets.length === 0) {
+    ui.alert("Cronos · Auditoría Global", "Aún no existen pestañas de asistencia de Cronos en este archivo.", ui.ButtonSet.OK);
+    return;
+  }
+
+  let totalRegistros = 0;
+  let hojasConDatos = 0;
+  const erroresGlobales = [];
+
+  for (let i = 0; i < sheets.length; i++) {
+    const s = sheets[i];
+    if (s.getLastRow() < 2) continue;
+    hojasConDatos++;
+    const res = auditarFilasInterno_(s, true);
+    totalRegistros += res.total;
+    if (!res.ok) {
+      for (let j = 0; j < res.errores.length; j++) {
+        erroresGlobales.push("[" + s.getName() + "] " + res.errores[j].replace(/^•\s*/, ""));
+      }
+    }
+  }
+
+  if (hojasConDatos === 0) {
+    ui.alert("Cronos · Auditoría Global", "Las pestañas de Cronos aún no contienen registros.", ui.ButtonSet.OK);
+    return;
+  }
+
+  if (erroresGlobales.length === 0) {
+    ui.alert(
+      "✅ Todos los Meses Verificados (100% Auténtico)",
+      "Se auditaron " + hojasConDatos + " pestaña(s) con un total de " + totalRegistros + " registro(s).\n\n" +
+      "Todos los sellos criptográficos HMAC-SHA256 son auténticos y ninguna fila fue alterada ni eliminada.",
+      ui.ButtonSet.OK
+    );
+  } else {
+    ui.alert(
+      "⚠️ Alteraciones Detectadas en Auditoría Global",
+      "Se detectaron " + erroresGlobales.length + " inconsistencia(s):\n\n" +
+      erroresGlobales.slice(0, 8).map(function (msg) { return "• " + msg; }).join("\n") +
+      (erroresGlobales.length > 8 ? "\n...y " + (erroresGlobales.length - 8) + " más." : "") +
+      "\n\nRevisa las celdas marcadas en ROJO en las pestañas indicadas.",
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * Reaplica anchos, alturas y diseño visual a la pestaña activa.
  */
 function reaplicarDisenoCronos() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = spreadsheet.getSheetByName(CRONOS_SHEET_NAME) || spreadsheet.getActiveSheet();
-  aplicarFormatoBaseHoja_(sheet);
+  const sheet = spreadsheet.getActiveSheet();
+  if (!esHojaCronos_(sheet)) {
+    spreadsheet.toast("Selecciona primero una pestaña de registros de Cronos.", "🎨 Cronos", 5);
+    return;
+  }
+  const esPrimeraCronos = obtenerPrimeraHojaCronos_(spreadsheet).getSheetId() === sheet.getSheetId();
+  aplicarFormatoBaseHoja_(sheet, esPrimeraCronos ? "#10B981" : "#64748B");
   const lastRow = sheet.getLastRow();
   for (let r = 2; r <= lastRow; r++) {
     estilizarFilaRegistro_(sheet, r);
   }
   auditarFilasInterno_(sheet, false);
-  SpreadsheetApp.getActiveSpreadsheet().toast("Diseño visual reaplicado correctamente.", "🎨 Cronos", 4);
+  spreadsheet.toast('Diseño visual reaplicado en "' + sheet.getName() + '".', "🎨 Cronos", 4);
 }
 
 /* ============================================================================
-   Funciones Internas (Diseño Visual y Criptografía HMAC-SHA256)
+   Funciones Internas (Gestión Mensual, Diseño Visual y Criptografía HMAC)
    ============================================================================ */
 
-function obtenerHojaCronos_(spreadsheet) {
-  let sheet = spreadsheet.getSheetByName(CRONOS_SHEET_NAME);
+/**
+ * Extrae el nombre de pestaña mensual (ej. "Octubre 2026") y prefijo "202610"
+ * directamente del string localTime ("yyyy-MM-dd HH:mm:ss") ya convertido a la
+ * zona horaria oficial configurada en Google Sheets.
+ */
+function resolverInfoMesDesdeFechaLocal_(localTimeStr) {
+  const anio = localTimeStr.slice(0, 4);
+  const mesStr = localTimeStr.slice(5, 7);
+  const mesIdx = parseInt(mesStr, 10) - 1;
+  const nombreMes = CRONOS_MESES_ES[mesIdx] || ("Mes " + mesStr);
+  return {
+    nombreHoja: nombreMes + " " + anio,
+    ymCodigo: anio + mesStr
+  };
+}
+
+/**
+ * Si el nombre de la pestaña corresponde a un mes (ej. "Noviembre 2026"),
+ * devuelve su código "202611"; si es una pestaña legada devuelve null.
+ */
+function parsearYmDesdeNombreHoja_(sheetName) {
+  const m = String(sheetName || "").trim().match(/^([A-Za-záéíóúÁÉÍÓÚ]+)\s+(\d{4})$/);
+  if (!m) return null;
+  const nombreLower = m[1].toLowerCase();
+  for (let i = 0; i < CRONOS_MESES_ES.length; i++) {
+    if (CRONOS_MESES_ES[i].toLowerCase() === nombreLower) {
+      return m[2] + String(i + 1).padStart(2, "0");
+    }
+  }
+  return null;
+}
+
+function esHojaCronos_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < 9) return false;
+  return String(sheet.getRange(1, 9).getValue() || "") === CRONOS_HEADERS[8];
+}
+
+function obtenerPrimeraHojaCronos_(spreadsheet) {
+  const sheets = spreadsheet.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    if (esHojaCronos_(sheets[i])) return sheets[i];
+  }
+  return sheets[0];
+}
+
+/**
+ * Obtiene la pestaña del mes correspondiente (ej. "Noviembre 2026").
+ * - Si el archivo es nuevo (1 sola hoja vacía), la renombra directamente al mes actual.
+ * - Si cambia el mes (o ya existe "Registros de Asistencia" con datos), conserva
+ *   intactas las hojas previas y crea la nueva pestaña mensual en la posición 0
+ *   (primera a la izquierda) para que Google Sheets abra directo en el mes en curso.
+ */
+function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
+  let sheet = spreadsheet.getSheetByName(nombreMesHoja);
 
   if (!sheet) {
-    const active = spreadsheet.getActiveSheet();
-    if (active.getLastRow() === 0) {
-      sheet = active;
-      try {
-        sheet.setName(CRONOS_SHEET_NAME);
-      } catch (_) {}
-    } else if (
-      active.getLastColumn() >= 9 &&
-      String(active.getRange(1, 9).getValue()) === CRONOS_HEADERS[8]
-    ) {
-      sheet = active;
-    } else {
-      sheet = spreadsheet.insertSheet(CRONOS_SHEET_NAME, 0);
+    const allSheets = spreadsheet.getSheets();
+
+    // Atenuar el color de pestañas anteriores de Cronos a gris pizarra (#64748B)
+    for (let i = 0; i < allSheets.length; i++) {
+      if (esHojaCronos_(allSheets[i])) {
+        try {
+          allSheets[i].setTabColor("#64748B");
+        } catch (_) {}
+      }
     }
+
+    if (allSheets.length === 1 && allSheets[0].getLastRow() === 0) {
+      sheet = allSheets[0];
+      try {
+        sheet.setName(nombreMesHoja);
+      } catch (_) {}
+    } else {
+      // Crear nueva pestaña del mes al inicio (posición 0 = primera a la izquierda)
+      sheet = spreadsheet.insertSheet(nombreMesHoja, 0);
+    }
+
+    inicializarHojaCronos_(sheet);
+    return sheet;
   }
 
   if (sheet.getLastRow() === 0) {
     inicializarHojaCronos_(sheet);
   } else if (sheet.getLastRow() === 1) {
-    // Si el admin borró las filas de prueba dejando solo el encabezado, reiniciar cabeza de cadena
+    // Si el admin borró filas de prueba dejando solo el encabezado, reiniciar cabeza de cadena de este mes
     PropertiesService.getScriptProperties().deleteProperty("CRONOS_CHAIN_HEAD_" + sheet.getSheetId());
   }
 
@@ -271,12 +420,12 @@ function inicializarHojaCronos_(sheet) {
   const headerRange = sheet.getRange(1, 1, 1, 9);
   headerRange.setValues([CRONOS_HEADERS]);
 
-  aplicarFormatoBaseHoja_(sheet);
+  aplicarFormatoBaseHoja_(sheet, "#10B981");
 }
 
-function aplicarFormatoBaseHoja_(sheet) {
+function aplicarFormatoBaseHoja_(sheet, tabColorHex) {
   try {
-    sheet.setTabColor("#10B981");
+    sheet.setTabColor(tabColorHex || "#10B981");
   } catch (_) {}
 
   const headerRange = sheet.getRange(1, 1, 1, 9);
@@ -298,14 +447,12 @@ function aplicarFormatoBaseHoja_(sheet) {
     sheet.setColumnWidth(i + 1, CRONOS_COL_WIDTHS[i]);
   }
 
-  // Crear filtro si aún no existe
   if (!sheet.getFilter()) {
     try {
       sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 1), 9).createFilter();
     } catch (_) {}
   }
 
-  // Reglas de formato condicional para "Tipo de Registro" (Columna C)
   const maxRows = Math.max(sheet.getMaxRows() - 1, 500);
   const typeRange = sheet.getRange(2, 3, maxRows, 1);
 
@@ -351,22 +498,18 @@ function estilizarFilaRegistro_(sheet, rowIndex) {
     .setHorizontalAlignment("center")
     .setBorder(false, false, true, false, false, false, "#E2E8F0", SpreadsheetApp.BorderStyle.SOLID);
 
-  // Col B: Trabajador alineado a la izquierda y en negrita
   sheet.getRange(rowIndex, 2)
     .setHorizontalAlignment("left")
     .setFontWeight("bold");
 
-  // Col D: Enlace de Google Maps estilizado
   sheet.getRange(rowIndex, 4)
     .setFontColor("#1D4ED8")
     .setFontWeight("bold");
 
-  // Col F & H: Coordenadas y Timestamp UTC en tipografía monoespaciada
   sheet.getRange(rowIndex, 6).setFontFamily("Roboto Mono").setFontSize(9).setFontColor("#475569");
   sheet.getRange(rowIndex, 7).setFontSize(9).setFontColor("#475569");
   sheet.getRange(rowIndex, 8).setFontFamily("Roboto Mono").setFontSize(9).setFontColor("#64748B");
 
-  // Col I: Sello criptográfico válido en verde esmeralda suave
   sheet.getRange(rowIndex, 9)
     .setBackground("#ECFDF5")
     .setFontColor("#065F46")
@@ -393,10 +536,15 @@ function extraerCodigoSello_(rawCell) {
     .trim();
 }
 
-function calcularSelloFila_(seq, prevSeal, campos, secret) {
+/**
+ * Calcula el sello HMAC-SHA256 encadenado.
+ * Si ymCodigo está presente (pestañas mensuales), genera "CRN-YYYYMM-XXXX-<16hex>".
+ * Si ymCodigo es vacío (compatibilidad con hoja legada "Registros de Asistencia"), genera "CRN-XXXX-<16hex>".
+ */
+function calcularSelloFila_(ymCodigo, seq, prevSeal, campos, secret) {
   const seqPad = String(seq).padStart(4, "0");
-  const canonical = [
-    seqPad,
+  const partes = ymCodigo ? [ymCodigo, seqPad] : [seqPad];
+  const canonical = partes.concat([
     prevSeal,
     campos.localTime,
     campos.workerName,
@@ -406,7 +554,7 @@ function calcularSelloFila_(seq, prevSeal, campos, secret) {
     campos.coords,
     campos.timeZone,
     campos.utcTime
-  ].join("|");
+  ]).join("|");
 
   const sigBytes = Utilities.computeHmacSha256Signature(
     canonical,
@@ -422,7 +570,9 @@ function calcularSelloFila_(seq, prevSeal, campos, secret) {
     .join("")
     .slice(0, 16);
 
-  return "CRN-" + seqPad + "-" + hex;
+  return ymCodigo
+    ? ("CRN-" + ymCodigo + "-" + seqPad + "-" + hex)
+    : ("CRN-" + seqPad + "-" + hex);
 }
 
 function auditarFilasInterno_(sheet, checkDeletedTail) {
@@ -435,9 +585,12 @@ function auditarFilasInterno_(sheet, checkDeletedTail) {
   const displayValues = dataRange.getDisplayValues();
   const richValues = sheet.getRange(2, 4, numRows, 1).getRichTextValues();
 
+  const ymHoja = parsearYmDesdeNombreHoja_(sheet.getName());
   const secret = obtenerSecretoHmac_();
   const errores = [];
-  let prevSeal = "GENESIS";
+
+  // Soportar tanto génesis mensual ("GENESIS-202610") como génesis legado ("GENESIS")
+  let prevSeal = ymHoja ? ("GENESIS-" + ymHoja) : "GENESIS";
 
   for (let i = 0; i < numRows; i++) {
     const sheetRow = i + 2;
@@ -453,7 +606,21 @@ function auditarFilasInterno_(sheet, checkDeletedTail) {
     const utcTime = String(values[i][7] || "").trim();
     const storedSeal = extraerCodigoSello_(values[i][8]);
 
+    // Determinar prefijo YM esperado para esta fila
+    let ymEsperado = ymHoja;
+    if (!ymEsperado) {
+      const mSeal = storedSeal.match(/^CRN-(\d{6})-\d{4}-[0-9a-f]{16}$/);
+      ymEsperado = mSeal ? mSeal[1] : "";
+      if (i === 0 && ymEsperado) {
+        prevSeal = "GENESIS-" + ymEsperado;
+      }
+    }
+
+    const rowYm = localTime.length >= 7 ? (localTime.slice(0, 4) + localTime.slice(5, 7)) : "";
+    const mesCoincide = !ymHoja || (rowYm === ymHoja);
+
     const expectedSeal = calcularSelloFila_(
+      ymEsperado,
       seq,
       prevSeal,
       {
@@ -470,13 +637,16 @@ function auditarFilasInterno_(sheet, checkDeletedTail) {
     );
 
     const sealCell = sheet.getRange(sheetRow, 9);
-    if (!storedSeal || storedSeal !== expectedSeal) {
-      errores.push("• Fila " + sheetRow + " (" + (workerName || "Sin nombre") + "): Sello inválido o fila editada manualmente.");
+    if (!storedSeal || !mesCoincide || storedSeal !== expectedSeal) {
+      const motivo = !mesCoincide
+        ? "La fecha de la fila no pertenece al mes de esta pestaña (" + sheet.getName() + ")."
+        : "Sello inválido o fila editada manualmente.";
+      errores.push("• Fila " + sheetRow + " (" + (workerName || "Sin nombre") + "): " + motivo);
       sealCell
         .setBackground("#FEE2E2")
         .setFontColor("#991B1B")
         .setFontWeight("bold")
-        .setNote("⚠️ ALERTA CRONOS: Esta fila fue escrita o modificada manualmente en Google Sheets (o se eliminó una fila previa). El sello HMAC-SHA256 no coincide con el registro original del servidor.");
+        .setNote("⚠️ ALERTA CRONOS: " + motivo + " El sello HMAC-SHA256 no coincide con el registro original del servidor.");
     } else {
       sealCell
         .setBackground("#ECFDF5")
@@ -495,7 +665,7 @@ function auditarFilasInterno_(sheet, checkDeletedTail) {
         const head = JSON.parse(headRaw);
         if (head.count > numRows) {
           errores.push(
-            "• Se detectaron filas eliminadas al final de la hoja: el servidor registró " +
+            "• Se detectaron filas eliminadas al final de \"" + sheet.getName() + "\": el servidor registró " +
             head.count + " marca(s), pero actualmente solo existen " + numRows + "."
           );
         }

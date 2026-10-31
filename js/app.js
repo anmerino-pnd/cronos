@@ -1075,9 +1075,10 @@ async function handleAdminTestConnection() {
     });
 
     out.className = 'alert alert-success';
+    const sheetInfo = result.sheetName ? ` en la pestaña "${result.sheetName}"` : ' en tu Google Sheets';
     const sealInfo = result.seal ? ` · Sello: ${result.seal}` : '';
     out.textContent =
-      `¡Conexión exitosa! Se insertó una fila de prueba con formato automático en tu Google Sheets. Hora oficial: ${result.localTime} (${result.timeZone || 'Zona local'})${sealInfo}.`;
+      `¡Conexión exitosa! Se insertó una fila de prueba con formato automático${sheetInfo}. Hora oficial: ${result.localTime} (${result.timeZone || 'Zona local'})${sealInfo}.`;
   } catch (err) {
     out.className = 'alert alert-error';
     out.textContent =
