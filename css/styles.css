@@ -607,6 +607,90 @@ textarea {
   word-break: break-word;
 }
 
+.worker-id-row {
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+}
+
+.worker-id-chip {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  padding: 0.16rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #E2E8F0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.worker-id-chip:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.38);
+}
+
+.worker-id-prefix {
+  color: #6EE7B7;
+  letter-spacing: 0.05em;
+}
+
+.worker-id-copy-tag {
+  font-family: var(--font-sans);
+  font-size: 0.67rem;
+  font-weight: 600;
+  color: #94A3B8;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  padding-left: 0.35rem;
+}
+
+/* Segmented Tabs for Onboarding / Login by 8-Digit ID */
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  background-color: var(--surface-sunken);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 0.25rem;
+  margin-bottom: 1.1rem;
+}
+
+.auth-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  min-height: 42px;
+  padding: 0.45rem 0.6rem;
+  font-family: var(--font-sans);
+  font-size: 0.87rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.auth-tab.is-active {
+  background-color: var(--ink-primary);
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+}
+
+.input-id-code {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
 .btn-card-options {
   appearance: none;
   background: rgba(255, 255, 255, 0.12);
@@ -1375,9 +1459,19 @@ textarea {
   background-color: #D1FAE5;
 }
 
+.option-card-btn.is-danger {
+  border-color: var(--danger-border);
+  background-color: var(--danger-soft);
+}
+
+.option-card-btn.is-danger:hover {
+  background-color: #FEE2E2;
+  border-color: var(--danger);
+}
+
 .option-card-btn.is-armed {
-  border-color: var(--accent-amber);
-  background-color: var(--accent-amber-soft);
+  border-color: var(--danger);
+  background-color: #FEE2E2;
 }
 
 .option-card-head {
@@ -1398,8 +1492,9 @@ textarea {
   color: var(--action-in);
 }
 
+.option-card-btn.is-danger .option-card-title,
 .option-card-btn.is-armed .option-card-title {
-  color: #92400E;
+  color: #991B1B;
 }
 
 .option-pill {
@@ -1415,10 +1510,57 @@ textarea {
   border: 1px solid var(--action-in-border);
 }
 
+.option-pill.is-neutral {
+  color: var(--ink-secondary);
+  border-color: var(--border-strong);
+  background-color: var(--surface-sunken);
+}
+
+.option-pill.is-danger-pill {
+  color: #991B1B;
+  border-color: var(--danger-border);
+  background-color: #FFFFFF;
+}
+
 .option-card-desc {
   font-size: 0.81rem;
   color: var(--ink-muted);
   line-height: 1.42;
+}
+
+.option-card-btn.is-danger .option-card-desc {
+  color: #7F1D1D;
+}
+
+/* Worker 8-Digit ID Showcase Box */
+.id-showcase-box {
+  background-color: var(--surface-sunken);
+  border: 2px dashed var(--action-in);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.id-showcase-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--action-in);
+}
+
+.id-showcase-digits {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 2.05rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-primary);
+  line-height: 1.1;
 }
 
 @media (max-width: 380px) {

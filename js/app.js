@@ -13,6 +13,8 @@ import {
 
 const STORAGE_CONFIG_KEY = 'checador_config';
 const STORAGE_LAST_CHECKIN_KEY = 'last_checkin';
+const STORAGE_DEVICE_ID_KEY = 'cronos_device_id';
+const STORAGE_KNOWN_WORKERS_KEY = 'cronos_known_workers';
 const STORAGE_PWA_DISMISSED_KEY = 'cronos_pwa_dismissed_at';
 const STORAGE_ADMIN_DRAFT_KEY = 'cronos_admin_draft';
 
@@ -27,8 +29,10 @@ const MONTHS_SHORT_ES = [
 // Application Runtime State
 const state = {
   currentView: null, // 'welcome' | 'register' | 'checador' | 'admin'
-  quickSwitchMode: false, // true when active worker taps "Cambiar QR / Hoja" to switch sheet keeping their name
-  pendingCompany: null, // { scriptId, orgName, isNameChange: boolean }
+  quickSwitchMode: false, // true when active worker taps "Cambiar QR / Hoja" keeping their session & ID
+  registerAuthTab: 'new', // 'new' | 'id'
+  pendingNewWorkerId: '', // 8-digit ID pre-generated for "Soy nuevo"
+  pendingCompany: null, // { scriptId, orgName, isSessionSwitch: boolean }
   lastAttemptedPunchType: null, // 'ENTRADA' | 'SALIDA'
   pendingRepeatType: null,
   unlinkConfirmArmed: false,
@@ -38,7 +42,8 @@ const state = {
   qrScannerRunning: false,
   html5QrScriptPromise: null,
   adminModulesPromise: null,
-  activeAdminAccess: null // { scriptId, orgName, token, magicLink }
+  activeAdminAccess: null, // { scriptId, orgName, token, magicLink }
+  deviceId: '' // Persistent phone identifier (CEL-XXXXXXXX)
 };
 
 // Cached DOM References
@@ -54,12 +59,19 @@ function cacheElements() {
     'qr-reader', 'scanner-status-msg', 'qr-file-input', 'btn-close-scanner',
     'form-paste-invite', 'input-invite-code', 'btn-paste-clipboard',
     'btn-cancel-quick-switch',
-    // View 2: Register
+    // View 2: Register / Session Login (New Worker or 8-Digit ID)
     'view-register', 'register-kicker', 'register-org-name',
-    'register-switch-notice', 'register-error', 'form-worker-register',
-    'input-worker-name', 'input-privacy-accept', 'btn-save-worker', 'btn-cancel-register',
+    'register-switch-notice', 'register-error',
+    'auth-mode-tabs', 'tab-auth-new', 'tab-auth-id',
+    'pane-auth-new', 'pane-auth-id',
+    'form-worker-register', 'input-worker-name',
+    'register-generated-id', 'btn-copy-register-id',
+    'input-worker-id', 'login-bind-name-box', 'input-bind-worker-name',
+    'input-privacy-accept', 'btn-save-worker', 'btn-cancel-register',
     // View 3: Checador
-    'view-checador', 'checador-org-name', 'checador-worker-name', 'btn-card-options',
+    'view-checador', 'checador-org-name', 'checador-worker-name',
+    'checador-worker-id', 'btn-copy-worker-id', 'worker-id-copy-tag',
+    'btn-card-options',
     'live-clock-time', 'live-clock-date', 'btn-punch-in', 'btn-punch-out',
     'punch-loading-box', 'punch-loading-title', 'punch-loading-sub',
     'punch-error-box', 'punch-error-title', 'punch-error-desc', 'punch-error-steps',
@@ -76,17 +88,181 @@ function cacheElements() {
     'btn-download-qr', 'btn-print-qr', 'btn-test-connection', 'test-connection-result',
     // Modals & Toast
     'modal-success', 'success-banner', 'success-stamp', 'success-time-big',
-    'success-headline', 'success-worker', 'success-org', 'success-server-time',
-    'success-timezone', 'success-accuracy', 'success-seal-row', 'success-seal', 'btn-close-success',
+    'success-headline', 'success-worker', 'success-worker-id', 'success-org',
+    'success-server-time', 'success-timezone', 'success-accuracy',
+    'success-seal-row', 'success-seal', 'btn-close-success',
     'modal-confirm-repeat', 'repeat-message', 'btn-confirm-repeat-yes', 'btn-confirm-repeat-no',
     'modal-account', 'account-modal-sub', 'btn-switch-qr', 'desc-switch-qr',
     'btn-change-worker', 'desc-change-worker',
     'btn-unlink-company', 'title-unlink-company', 'desc-unlink-company', 'btn-close-account',
+    'modal-worker-id', 'modal-id-worker-name', 'modal-id-digits',
+    'btn-modal-copy-id', 'btn-close-worker-id',
     'app-toast'
   ];
 
   for (const id of ids) {
     el[id] = document.getElementById(id);
+  }
+}
+
+/* ==========================================================================
+   Persistent Device Identity (CEL-XXXXXXXX) & 8-Digit Worker ID Helpers
+   ========================================================================== */
+
+function generateRandomHex8() {
+  if (window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint8Array(4);
+    window.crypto.getRandomValues(arr);
+    return Array.from(arr)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
+  }
+  return Math.floor(0x10000000 + Math.random() * 0xefffffff)
+    .toString(16)
+    .toUpperCase()
+    .slice(0, 8);
+}
+
+function readDeviceCookie() {
+  try {
+    const m = document.cookie.match(/(?:^|;\s*)cronos_device_id=([A-Za-z0-9\-]+)/);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+function writeDeviceCookie(devId) {
+  try {
+    document.cookie = `cronos_device_id=${devId}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {
+    // Ignore cookie errors in restricted contexts
+  }
+}
+
+function syncDeviceIdWithIndexedDb(currentId) {
+  try {
+    if (!('indexedDB' in window)) return;
+    const req = window.indexedDB.open('cronos_device_db', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('meta')) {
+        db.createObjectStore('meta');
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('meta', 'readwrite');
+      const store = tx.objectStore('meta');
+      const getReq = store.get('deviceId');
+      getReq.onsuccess = () => {
+        const idbVal = getReq.result;
+        if (idbVal && typeof idbVal === 'string' && /^CEL-[A-Z0-9]{8}$/.test(idbVal)) {
+          state.deviceId = idbVal;
+          try {
+            localStorage.setItem(STORAGE_DEVICE_ID_KEY, idbVal);
+          } catch {}
+          writeDeviceCookie(idbVal);
+        } else if (currentId) {
+          store.put(currentId, 'deviceId');
+        }
+      };
+    };
+  } catch {
+    // Ignore IndexedDB restrictions
+  }
+}
+
+function getDeviceLabel() {
+  const ua = navigator.userAgent || '';
+  let os = 'Móvil';
+  if (/iPhone|iPad|iPod/i.test(ua)) os = 'iPhone';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Mac OS/i.test(ua)) os = 'Mac';
+
+  let browser = 'Web';
+  if (/Edg\//i.test(ua)) browser = 'Edge';
+  else if (/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) browser = 'Chrome';
+  else if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) browser = 'Safari';
+  else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+
+  return `${os} · ${browser}`;
+}
+
+function getDeviceIdentity() {
+  if (!state.deviceId) {
+    let stored = '';
+    try {
+      stored = localStorage.getItem(STORAGE_DEVICE_ID_KEY) || '';
+    } catch {}
+    if (!/^CEL-[A-Z0-9]{8}$/.test(stored)) {
+      stored = readDeviceCookie();
+    }
+    if (!/^CEL-[A-Z0-9]{8}$/.test(stored)) {
+      stored = `CEL-${generateRandomHex8()}`;
+    }
+    state.deviceId = stored;
+    try {
+      localStorage.setItem(STORAGE_DEVICE_ID_KEY, stored);
+    } catch {}
+    writeDeviceCookie(stored);
+    syncDeviceIdWithIndexedDb(stored);
+  }
+  return {
+    deviceId: state.deviceId,
+    deviceLabel: getDeviceLabel()
+  };
+}
+
+function normalizeWorkerId8(raw) {
+  const digits = String(raw || '').replace(/\D+/g, '');
+  return digits.length === 8 ? digits : '';
+}
+
+function formatWorkerId8(raw) {
+  const digits = normalizeWorkerId8(raw);
+  if (!digits) return '----';
+  return `${digits.slice(0, 4)}-${digits.slice(4, 8)}`;
+}
+
+function formatPartialWorkerIdInput(raw) {
+  const digits = String(raw || '').replace(/\D+/g, '').slice(0, 8);
+  if (digits.length <= 4) return digits;
+  return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+}
+
+function generateRandomWorkerId8() {
+  if (window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    const num = 10000000 + (arr[0] % 90000000);
+    return String(num);
+  }
+  return String(Math.floor(10000000 + Math.random() * 90000000));
+}
+
+function rememberWorkerLocally(workerId, workerName) {
+  const cleanId = normalizeWorkerId8(workerId);
+  if (!cleanId || !workerName) return;
+  try {
+    const map = JSON.parse(localStorage.getItem(STORAGE_KNOWN_WORKERS_KEY) || '{}');
+    map[cleanId] = workerName;
+    localStorage.setItem(STORAGE_KNOWN_WORKERS_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function lookupLocalWorkerName(workerId) {
+  const cleanId = normalizeWorkerId8(workerId);
+  if (!cleanId) return '';
+  try {
+    const map = JSON.parse(localStorage.getItem(STORAGE_KNOWN_WORKERS_KEY) || '{}');
+    return typeof map[cleanId] === 'string' ? map[cleanId] : '';
+  } catch {
+    return '';
   }
 }
 
@@ -109,6 +285,12 @@ function loadConfig() {
       parsed.workerName.trim() &&
       parsed.privacyAccepted === true
     ) {
+      // Auto-assign an 8-digit workerId if migrating from an older localStorage config
+      if (!normalizeWorkerId8(parsed.workerId)) {
+        parsed.workerId = generateRandomWorkerId8();
+        saveConfig(parsed);
+      }
+      rememberWorkerLocally(parsed.workerId, parsed.workerName);
       return parsed;
     }
     return null;
@@ -119,6 +301,9 @@ function loadConfig() {
 
 function saveConfig(config) {
   localStorage.setItem(STORAGE_CONFIG_KEY, JSON.stringify(config));
+  if (config && config.workerId && config.workerName) {
+    rememberWorkerLocally(config.workerId, config.workerName);
+  }
 }
 
 function loadLastCheckin() {
@@ -246,7 +431,6 @@ function isRequestedAdminRoute() {
 }
 
 async function switchView(viewName) {
-  // Stop camera scanner when leaving welcome view without delaying DOM transition
   if (viewName !== 'welcome') {
     stopQrScanner();
   }
@@ -318,7 +502,7 @@ function routeFromCurrentState() {
       openRegistrationForCompany({
         scriptId: decoded.scriptId,
         orgName: decoded.orgName,
-        isNameChange: false
+        isSessionSwitch: false
       });
       return;
     } else {
@@ -347,10 +531,10 @@ function renderWelcomeView() {
   showWelcomeError('');
 
   if (isQuickSwitch) {
-    el['welcome-eyebrow'].textContent = 'Cambio de hoja · Conservando tu nombre';
+    el['welcome-eyebrow'].textContent = 'Cambio de hoja · Manteniendo tu sesión';
     el['welcome-heading'].textContent = 'Vincular nuevo QR o enlace';
     el['welcome-lead'].textContent =
-      `Escanea el nuevo código QR o pega el nuevo enlace de WhatsApp (por ejemplo, nueva hoja anual o sucursal). Seguirás registrado como "${existing.workerName}".`;
+      `Escanea el nuevo código QR o pega el nuevo enlace (por ejemplo, nueva hoja anual). Seguirás en tu sesión como "${existing.workerName}" (ID ${formatWorkerId8(existing.workerId)}).`;
     el['label-open-scanner'].textContent = 'Escanear nuevo código QR';
     el['btn-cancel-quick-switch'].hidden = false;
   } else {
@@ -366,7 +550,7 @@ function renderWelcomeView() {
 /**
  * Applies a decoded company invite. If the worker launched "Cambiar QR / Hoja"
  * (`state.quickSwitchMode`), switches the linked Google Sheet in 1 step while
- * preserving their saved worker name and privacy consent without re-typing.
+ * preserving their saved `workerName`, 8-digit `workerId`, and privacy consent.
  */
 function applyDecodedInvite({ scriptId, orgName }) {
   const existing = loadConfig();
@@ -376,6 +560,7 @@ function applyDecodedInvite({ scriptId, orgName }) {
     const updatedConfig = {
       scriptId,
       orgName,
+      workerId: existing.workerId,
       workerName: existing.workerName,
       privacyAccepted: true,
       configuredAt: new Date().toISOString()
@@ -394,7 +579,7 @@ function applyDecodedInvite({ scriptId, orgName }) {
   openRegistrationForCompany({
     scriptId,
     orgName,
-    isNameChange: false
+    isSessionSwitch: false
   });
 }
 
@@ -484,7 +669,6 @@ async function startQrScanner() {
       );
       state.qrScannerRunning = true;
     } catch {
-      // Fallback for laptops / front-only cameras
       await state.qrScanner.start(
         { facingMode: 'user' },
         scanConfig,
@@ -553,46 +737,81 @@ async function handleQrImageUpload(event) {
 }
 
 /* ==========================================================================
-   View 2: Worker Onboarding — Registration & Privacy Consent
+   View 2: Worker Onboarding & Session Login (New Worker or 8-Digit ID)
    ========================================================================== */
 
-function openRegistrationForCompany({ scriptId, orgName, isNameChange = false }) {
-  const existing = loadConfig();
-  state.pendingCompany = { scriptId, orgName, isNameChange };
+function setRegisterAuthTab(mode) {
+  const isNew = mode !== 'id';
+  state.registerAuthTab = isNew ? 'new' : 'id';
+
+  el['tab-auth-new'].classList.toggle('is-active', isNew);
+  el['tab-auth-new'].setAttribute('aria-selected', String(isNew));
+
+  el['tab-auth-id'].classList.toggle('is-active', !isNew);
+  el['tab-auth-id'].setAttribute('aria-selected', String(!isNew));
+
+  el['pane-auth-new'].hidden = !isNew;
+  el['pane-auth-id'].hidden = isNew;
 
   el['register-error'].hidden = true;
-  el['register-kicker'].textContent = isNameChange
-    ? 'Cambiar trabajador en:'
+  el['btn-save-worker'].textContent = isNew
+    ? 'Crear mi ID y entrar'
+    : 'Iniciar sesión con mi ID';
+}
+
+function openRegistrationForCompany({ scriptId, orgName, isSessionSwitch = false }) {
+  const existing = loadConfig();
+  state.pendingCompany = { scriptId, orgName, isSessionSwitch };
+  state.pendingNewWorkerId = generateRandomWorkerId8();
+
+  el['register-error'].hidden = true;
+  el['login-bind-name-box'].hidden = true;
+  el['input-bind-worker-name'].value = '';
+  el['input-worker-id'].value = '';
+  el['register-generated-id'].textContent = formatWorkerId8(state.pendingNewWorkerId);
+
+  el['register-kicker'].textContent = isSessionSwitch
+    ? 'Cambiar sesión en:'
     : 'Te estás uniendo a:';
   el['register-org-name'].textContent = orgName;
 
-  if (!isNameChange && existing && existing.scriptId !== scriptId) {
+  if (!isSessionSwitch && existing && existing.scriptId !== scriptId) {
     el['register-switch-notice'].textContent =
       `Este dispositivo estaba vinculado a "${existing.orgName}". Al guardar quedarás vinculado a "${orgName}".`;
+    el['register-switch-notice'].hidden = false;
+  } else if (isSessionSwitch && existing) {
+    el['register-switch-notice'].textContent =
+      `Ingresa tu ID de 8 dígitos para iniciar tu sesión en "${orgName}" (o elige "Soy nuevo" si aún no tienes ID).`;
     el['register-switch-notice'].hidden = false;
   } else {
     el['register-switch-notice'].hidden = true;
   }
 
-  if (isNameChange && existing) {
-    el['input-worker-name'].value = existing.workerName;
+  if (isSessionSwitch) {
+    el['input-worker-name'].value = '';
     el['input-privacy-accept'].checked = true;
+    setRegisterAuthTab('id');
   } else if (existing && existing.workerName) {
     el['input-worker-name'].value = existing.workerName;
     el['input-privacy-accept'].checked = existing.privacyAccepted === true;
+    setRegisterAuthTab('new');
   } else {
     el['input-worker-name'].value = '';
     el['input-privacy-accept'].checked = false;
+    setRegisterAuthTab('new');
   }
 
   switchView('register');
   setTimeout(() => {
-    el['input-worker-name'].focus();
-    if (isNameChange) el['input-worker-name'].select();
+    if (state.registerAuthTab === 'id') {
+      el['input-worker-id'].focus();
+    } else {
+      el['input-worker-name'].focus();
+    }
   }, 50);
 }
 
-function handleSaveWorkerRegistration(event) {
+async function handleSaveWorkerRegistration(event) {
   event.preventDefault();
   el['register-error'].hidden = true;
 
@@ -601,13 +820,44 @@ function handleSaveWorkerRegistration(event) {
     return;
   }
 
-  const workerName = (el['input-worker-name'].value || '').trim().replace(/\s+/g, ' ');
   const privacyAccepted = el['input-privacy-accept'].checked;
 
-  if (workerName.length < 2) {
-    el['register-error'].textContent = 'Escribe tu nombre completo (mínimo 2 caracteres).';
+  // MODE A: New Worker Registration ("Soy nuevo")
+  if (state.registerAuthTab === 'new') {
+    const workerName = (el['input-worker-name'].value || '').trim().replace(/\s+/g, ' ');
+    if (workerName.length < 2) {
+      el['register-error'].textContent = 'Escribe tu nombre completo (mínimo 2 caracteres).';
+      el['register-error'].hidden = false;
+      el['input-worker-name'].focus();
+      return;
+    }
+
+    if (!privacyAccepted) {
+      el['register-error'].textContent =
+        'Debes aceptar el aviso de privacidad sobre el uso puntual de tu ubicación GPS para continuar.';
+      el['register-error'].hidden = false;
+      el['input-privacy-accept'].focus();
+      return;
+    }
+
+    const workerId = normalizeWorkerId8(state.pendingNewWorkerId) || generateRandomWorkerId8();
+    completeWorkerSessionLogin({
+      scriptId: state.pendingCompany.scriptId,
+      orgName: state.pendingCompany.orgName,
+      workerId,
+      workerName,
+      toastMsg: `Perfil guardado correctamente · ID ${formatWorkerId8(workerId)}`
+    });
+    return;
+  }
+
+  // MODE B: Existing Worker Login by 8-Digit Numeric ID ("Ya tengo mi ID")
+  const digits8 = normalizeWorkerId8(el['input-worker-id'].value);
+  if (!digits8) {
+    el['register-error'].textContent =
+      'Ingresa tu ID completo de 8 dígitos numéricos (ej. 4829-1034).';
     el['register-error'].hidden = false;
-    el['input-worker-name'].focus();
+    el['input-worker-id'].focus();
     return;
   }
 
@@ -619,15 +869,110 @@ function handleSaveWorkerRegistration(event) {
     return;
   }
 
+  // If the sheet is brand-new and we already prompted them to confirm their name once:
+  if (!el['login-bind-name-box'].hidden) {
+    const boundName = (el['input-bind-worker-name'].value || '').trim().replace(/\s+/g, ' ');
+    if (boundName.length < 2) {
+      el['register-error'].textContent =
+        'Escribe tu nombre completo para vincular tu ID de 8 dígitos a esta hoja.';
+      el['register-error'].hidden = false;
+      el['input-bind-worker-name'].focus();
+      return;
+    }
+
+    completeWorkerSessionLogin({
+      scriptId: state.pendingCompany.scriptId,
+      orgName: state.pendingCompany.orgName,
+      workerId: digits8,
+      workerName: boundName,
+      toastMsg: `Sesión iniciada: ${boundName} (ID ${formatWorkerId8(digits8)})`
+    });
+    return;
+  }
+
+  // Query Google Sheets ("Trabajadores" tab) to resolve frozen workerName from 8-digit ID
+  const btn = el['btn-save-worker'];
+  const origBtnText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Verificando ID…';
+
+  try {
+    const device = getDeviceIdentity();
+    const res = await sendWebhookPost(
+      state.pendingCompany.scriptId,
+      {
+        action: 'login_worker',
+        workerId: digits8,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel
+      },
+      { allowNotFound: true }
+    );
+
+    if (res && res.status === 'ok' && res.workerName) {
+      completeWorkerSessionLogin({
+        scriptId: state.pendingCompany.scriptId,
+        orgName: state.pendingCompany.orgName,
+        workerId: normalizeWorkerId8(res.workerId) || digits8,
+        workerName: res.workerName,
+        toastMsg: `Sesión activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
+      });
+      return;
+    }
+
+    // Fallback if this phone already knows this 8-digit ID locally
+    const cachedName = lookupLocalWorkerName(digits8);
+    if (cachedName) {
+      completeWorkerSessionLogin({
+        scriptId: state.pendingCompany.scriptId,
+        orgName: state.pendingCompany.orgName,
+        workerId: digits8,
+        workerName: cachedName,
+        toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
+      });
+      return;
+    }
+
+    // If not found in this Sheet yet (e.g., brand-new annual Sheet), ask for name once keeping their 8-digit ID
+    el['login-bind-name-box'].hidden = false;
+    el['register-switch-notice'].textContent =
+      `El ID ${formatWorkerId8(digits8)} aún no aparece en la pestaña Trabajadores de "${state.pendingCompany.orgName}". Escribe tu nombre completo abajo una sola vez para vincular tu mismo ID.`;
+    el['register-switch-notice'].hidden = false;
+    el['input-bind-worker-name'].focus();
+  } catch (err) {
+    const cachedName = lookupLocalWorkerName(digits8);
+    if (cachedName) {
+      completeWorkerSessionLogin({
+        scriptId: state.pendingCompany.scriptId,
+        orgName: state.pendingCompany.orgName,
+        workerId: digits8,
+        workerName: cachedName,
+        toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
+      });
+      return;
+    }
+
+    el['register-error'].textContent =
+      (err && err.message) || 'No se pudo verificar el ID. Revisa tu conexión a internet.';
+    el['register-error'].hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origBtnText;
+  }
+}
+
+function completeWorkerSessionLogin({ scriptId, orgName, workerId, workerName, toastMsg }) {
   const prev = loadConfig();
   const isDifferentWorkerOrOrg =
     !prev ||
-    prev.scriptId !== state.pendingCompany.scriptId ||
+    prev.scriptId !== scriptId ||
+    prev.workerId !== workerId ||
     prev.workerName.toLowerCase() !== workerName.toLowerCase();
 
   const newConfig = {
-    scriptId: state.pendingCompany.scriptId,
-    orgName: state.pendingCompany.orgName,
+    scriptId,
+    orgName,
+    workerId,
     workerName,
     privacyAccepted: true,
     configuredAt: new Date().toISOString()
@@ -635,7 +980,6 @@ function handleSaveWorkerRegistration(event) {
 
   saveConfig(newConfig);
 
-  // Reset last_checkin if switching worker or company so the ticket strip starts fresh
   if (isDifferentWorkerOrOrg) {
     localStorage.removeItem(STORAGE_LAST_CHECKIN_KEY);
   }
@@ -643,7 +987,7 @@ function handleSaveWorkerRegistration(event) {
   cleanJoinQueryFromUrl();
   state.pendingCompany = null;
 
-  showToast('Perfil guardado correctamente');
+  showToast(toastMsg || 'Perfil guardado correctamente');
   switchView('checador');
 }
 
@@ -692,6 +1036,7 @@ function renderChecadorView() {
 
   el['checador-org-name'].textContent = config.orgName;
   el['checador-worker-name'].textContent = config.workerName;
+  el['checador-worker-id'].textContent = formatWorkerId8(config.workerId);
   el['punch-loading-box'].hidden = true;
   el['punch-error-box'].hidden = true;
   setPunchButtonsDisabled(false);
@@ -776,11 +1121,9 @@ async function acquireMandatoryGps() {
       maximumAge: 0
     });
   } catch (err) {
-    // Code 1 = PERMISSION_DENIED -> fail immediately with permission unlock guide
     if (err && err.code === 1) {
       throw err;
     }
-    // Code 2 (POSITION_UNAVAILABLE) or Code 3 (TIMEOUT) -> 1 fallback attempt
     return await getPositionPromise({
       enableHighAccuracy: false,
       timeout: 8000,
@@ -853,7 +1196,7 @@ function buildGpsFailureGuidance(err) {
   };
 }
 
-async function sendWebhookPost(scriptId, payload) {
+async function sendWebhookPost(scriptId, payload, { allowNotFound = false } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 22000);
 
@@ -876,6 +1219,10 @@ async function sendWebhookPost(scriptId, payload) {
       throw new Error(
         'La hoja de la empresa no devolvió una respuesta válida. Verifica con el administrador que en Apps Script "Quién tiene acceso" esté en "Cualquier usuario".'
       );
+    }
+
+    if (allowNotFound && data && data.status === 'not_found') {
+      return data;
     }
 
     if (!response.ok || !data || data.status !== 'ok') {
@@ -941,6 +1288,7 @@ async function executePunch(type) {
   const lat = Number(position.coords.latitude.toFixed(6));
   const lng = Number(position.coords.longitude.toFixed(6));
   const accuracy = Number((position.coords.accuracy || 0).toFixed(1));
+  const device = getDeviceIdentity();
 
   // Step 2: HTTP POST to Google Apps Script
   el['punch-loading-title'].textContent = 'Enviando registro…';
@@ -948,12 +1296,26 @@ async function executePunch(type) {
 
   try {
     const result = await sendWebhookPost(config.scriptId, {
+      workerId: config.workerId,
       workerName: config.workerName,
+      deviceId: device.deviceId,
+      deviceLabel: device.deviceLabel,
       type,
       lat,
       lng,
       accuracy
     });
+
+    // If the server returned the canonical frozen workerName or workerId from the Trabajadores tab, sync locally
+    const resolvedWorkerName = result.workerName || config.workerName;
+    const resolvedWorkerId = normalizeWorkerId8(result.workerId) || config.workerId;
+    if (resolvedWorkerName !== config.workerName || resolvedWorkerId !== config.workerId) {
+      config.workerName = resolvedWorkerName;
+      config.workerId = resolvedWorkerId;
+      saveConfig(config);
+      el['checador-worker-name'].textContent = config.workerName;
+      el['checador-worker-id'].textContent = formatWorkerId8(config.workerId);
+    }
 
     const checkinRecord = {
       type,
@@ -971,6 +1333,7 @@ async function executePunch(type) {
     showSuccessReceiptModal({
       type,
       workerName: config.workerName,
+      workerId: config.workerId,
       orgName: config.orgName,
       localTime: result.localTime,
       timeZone: result.timeZone || 'Local',
@@ -987,7 +1350,7 @@ async function executePunch(type) {
   }
 }
 
-function showSuccessReceiptModal({ type, workerName, orgName, localTime, timeZone, accuracy, seal }) {
+function showSuccessReceiptModal({ type, workerName, workerId, orgName, localTime, timeZone, accuracy, seal }) {
   const isEntrada = type === 'ENTRADA';
   const parts = formatServerTimeParts(localTime);
 
@@ -999,6 +1362,7 @@ function showSuccessReceiptModal({ type, workerName, orgName, localTime, timeZon
     : `¡Salida registrada con éxito a las ${parts.time12h}!`;
 
   el['success-worker'].textContent = workerName;
+  el['success-worker-id'].textContent = formatWorkerId8(workerId);
   el['success-org'].textContent = orgName;
   el['success-server-time'].textContent = localTime;
   el['success-timezone'].textContent = timeZone;
@@ -1037,7 +1401,6 @@ async function initAdminPanel() {
       '// Revisa el archivo backend/Code.gs o el README.md para copiar el código.';
   }
 
-  // Restore draft orgName/URL if previously used on this browser
   if (!el['admin-org-name'].value && !el['admin-script-url'].value) {
     try {
       const savedDraft = JSON.parse(sessionStorage.getItem(STORAGE_ADMIN_DRAFT_KEY) || 'null');
@@ -1102,7 +1465,6 @@ async function handleAdminGenerate(event) {
     el['admin-grid'].classList.add('has-output');
     el['admin-setup-guide'].open = false;
 
-    // Render crisp QR encoding the Magic Link (works both with native phone camera & in-app scanner!)
     qrMod.renderQRToCanvas(el['admin-qr-canvas'], magicLink, {
       size: 256,
       quietZone: 4,
@@ -1157,13 +1519,13 @@ async function handleAdminTestConnection() {
 }
 
 /* ==========================================================================
-   Modals & Account Menu (1-Step QR Switch, Edit Name & Reassuring Unlink)
+   Modals & Account Menu (Cambiar QR/Hoja, Cambiar sesión, Cerrar sesión)
    ========================================================================== */
 
+const MODAL_IDS = ['modal-success', 'modal-confirm-repeat', 'modal-account', 'modal-worker-id'];
+
 function syncBodyModalLock() {
-  const anyOpen = ['modal-success', 'modal-confirm-repeat', 'modal-account'].some(
-    (id) => el[id] && !el[id].hidden
-  );
+  const anyOpen = MODAL_IDS.some((id) => el[id] && !el[id].hidden);
   document.body.classList.toggle('modal-open', anyOpen);
 }
 
@@ -1192,9 +1554,9 @@ function closeModal(modalId) {
 function resetUnlinkConfirmationState() {
   state.unlinkConfirmArmed = false;
   el['btn-unlink-company'].classList.remove('is-armed');
-  el['title-unlink-company'].textContent = 'Salir / Desvincular este celular';
+  el['title-unlink-company'].textContent = 'Cerrar sesión';
   el['desc-unlink-company'].textContent =
-    'Cierra la sesión en este teléfono sin afectar tus asistencias ya enviadas. Puedes volver a escanear este o cualquier otro QR cuando quieras.';
+    'Borra y desvincula de este celular la empresa (QR/Sheets), tu usuario y tu sesión.';
 }
 
 function openAccountModal() {
@@ -1202,13 +1564,22 @@ function openAccountModal() {
   if (!config) return;
 
   resetUnlinkConfirmationState();
-  el['account-modal-sub'].textContent = `Activo: ${config.workerName} · ${config.orgName}`;
+  const formattedId = formatWorkerId8(config.workerId);
+  el['account-modal-sub'].textContent = `${config.workerName} · ID ${formattedId} · ${config.orgName}`;
   el['desc-switch-qr'].textContent =
-    `Escanea otro QR o pega un nuevo enlace (ej. nueva hoja anual o sucursal) conservando tu nombre "${config.workerName}" en un solo paso.`;
+    `Escanea otro QR (ej. nueva hoja anual) conservando tu sesión como "${config.workerName}" (ID ${formattedId}).`;
   el['desc-change-worker'].textContent =
-    `Corrige cómo aparece tu nombre o cámbialo si otro compañero usará este teléfono en "${config.orgName}".`;
+    `Permite que otro trabajador ingrese con su ID de 8 dígitos dentro de "${config.orgName}".`;
 
   openModal('modal-account', 'btn-switch-qr');
+}
+
+function openWorkerIdModal() {
+  const config = loadConfig();
+  if (!config) return;
+  el['modal-id-worker-name'].textContent = config.workerName;
+  el['modal-id-digits'].textContent = formatWorkerId8(config.workerId);
+  openModal('modal-worker-id', 'btn-modal-copy-id');
 }
 
 /* ==========================================================================
@@ -1293,6 +1664,14 @@ function bindEvents() {
     openAccountModal();
   });
 
+  el['btn-copy-worker-id'].addEventListener('click', async () => {
+    const config = loadConfig();
+    if (!config) return;
+    const formatted = formatWorkerId8(config.workerId);
+    await copyTextToClipboard(formatted);
+    openWorkerIdModal();
+  });
+
   window.addEventListener('hashchange', () => {
     routeFromCurrentState();
   });
@@ -1364,7 +1743,27 @@ function bindEvents() {
     }
   });
 
-  // View 2: Worker Registration
+  // View 2: Worker Onboarding & 8-Digit Session Login
+  el['tab-auth-new'].addEventListener('click', () => {
+    setRegisterAuthTab('new');
+    el['input-worker-name'].focus();
+  });
+
+  el['tab-auth-id'].addEventListener('click', () => {
+    setRegisterAuthTab('id');
+    el['input-worker-id'].focus();
+  });
+
+  el['input-worker-id'].addEventListener('input', () => {
+    el['input-worker-id'].value = formatPartialWorkerIdInput(el['input-worker-id'].value);
+  });
+
+  el['btn-copy-register-id'].addEventListener('click', async () => {
+    const formatted = formatWorkerId8(state.pendingNewWorkerId);
+    await copyTextToClipboard(formatted);
+    showToast(`ID ${formatted} copiado al portapapeles`);
+  });
+
   el['form-worker-register'].addEventListener('submit', handleSaveWorkerRegistration);
 
   el['btn-cancel-register'].addEventListener('click', () => {
@@ -1482,7 +1881,7 @@ function bindEvents() {
     closeModal('modal-confirm-repeat');
   });
 
-  // Modal 3: Account Menu (1-Step QR Switch, Edit Worker Name, Reassuring Unlink)
+  // Modal 3: Account Menu (1. Cambiar QR / Hoja, 2. Cambiar sesión, 3. Cerrar sesión [Rojo])
   el['btn-switch-qr'].addEventListener('click', () => {
     const config = loadConfig();
     closeModal('modal-account');
@@ -1505,7 +1904,7 @@ function bindEvents() {
     openRegistrationForCompany({
       scriptId: config.scriptId,
       orgName: config.orgName,
-      isNameChange: true
+      isSessionSwitch: true
     });
   });
 
@@ -1513,22 +1912,33 @@ function bindEvents() {
     if (!state.unlinkConfirmArmed) {
       state.unlinkConfirmArmed = true;
       el['btn-unlink-company'].classList.add('is-armed');
-      el['title-unlink-company'].textContent = 'Toca de nuevo para confirmar y salir';
+      el['title-unlink-company'].textContent = 'Confirmar cierre total';
       el['desc-unlink-company'].textContent =
-        'Volverás a la pantalla inicial lista para escanear cualquier código QR o enlace.';
+        'Toca de nuevo para confirmar: se borrará la empresa (QR/Sheets), tu usuario y tu sesión de este celular.';
       return;
     }
     state.quickSwitchMode = false;
     clearAllWorkerData();
     closeModal('modal-account');
-    showToast('Sesión cerrada. Puedes vincular un nuevo QR cuando gustes.');
+    showToast('Sesión cerrada y empresa desvinculada de este celular.');
     switchView('welcome');
   });
 
   el['btn-close-account'].addEventListener('click', () => closeModal('modal-account'));
 
+  // Modal 4: Worker 8-Digit ID Card
+  el['btn-modal-copy-id'].addEventListener('click', async () => {
+    const config = loadConfig();
+    if (!config) return;
+    const formatted = formatWorkerId8(config.workerId);
+    await copyTextToClipboard(formatted);
+    showToast(`ID ${formatted} copiado`);
+  });
+
+  el['btn-close-worker-id'].addEventListener('click', () => closeModal('modal-worker-id'));
+
   // Close modals on Escape key or backdrop click
-  for (const modalId of ['modal-success', 'modal-confirm-repeat', 'modal-account']) {
+  for (const modalId of MODAL_IDS) {
     el[modalId].addEventListener('click', (e) => {
       if (e.target === el[modalId]) {
         closeModal(modalId);
@@ -1538,7 +1948,7 @@ function bindEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      for (const modalId of ['modal-success', 'modal-confirm-repeat', 'modal-account']) {
+      for (const modalId of MODAL_IDS) {
         if (!el[modalId].hidden) {
           closeModal(modalId);
         }
@@ -1606,6 +2016,7 @@ function registerServiceWorker() {
 
 function init() {
   cacheElements();
+  getDeviceIdentity();
   bindEvents();
   registerServiceWorker();
   routeFromCurrentState();

@@ -148,7 +148,7 @@
     </section>
 
     <!-- ===================================================================
-         VIEW 2: WORKER ONBOARDING - STEP 2 (Worker Name & Privacy Consent)
+         VIEW 2: WORKER ONBOARDING & SESSION LOGIN (New Profile or 8-Digit ID)
          =================================================================== -->
     <section class="card" id="view-register" aria-labelledby="register-org-name" hidden>
       <div class="company-banner">
@@ -160,19 +160,77 @@
         <div class="alert alert-amber" id="register-switch-notice" role="status" hidden></div>
         <div class="alert alert-error" id="register-error" role="alert" hidden></div>
 
+        <!-- 2-Tab Mode Switcher: New Worker vs. Login with 8-Digit ID -->
+        <div class="auth-tabs" id="auth-mode-tabs" role="tablist" aria-label="Modo de acceso">
+          <button type="button" class="auth-tab is-active" id="tab-auth-new" role="tab" aria-selected="true">
+            Soy nuevo
+          </button>
+          <button type="button" class="auth-tab" id="tab-auth-id" role="tab" aria-selected="false">
+            Ya tengo mi ID
+          </button>
+        </div>
+
         <form id="form-worker-register" novalidate>
-          <div class="field">
-            <label class="field-label" for="input-worker-name">Nombre completo del trabajador</label>
-            <input
-              type="text"
-              id="input-worker-name"
-              class="input-text"
-              placeholder="Ej. Juan Pérez López"
-              autocomplete="name"
-              maxlength="80"
-              required
-            >
-            <p class="field-hint">Este nombre aparecerá en la hoja de asistencia de la empresa.</p>
+          <!-- Pane 1: New Worker (Creates 8-digit ID & freezes full name) -->
+          <div id="pane-auth-new">
+            <div class="field">
+              <label class="field-label" for="input-worker-name">Nombre completo del trabajador</label>
+              <input
+                type="text"
+                id="input-worker-name"
+                class="input-text"
+                placeholder="Ej. Juan Pérez López"
+                autocomplete="name"
+                maxlength="80"
+              >
+              <p class="field-hint">
+                Este nombre quedará <strong>congelado</strong> a tu ID para evitar variaciones en la hoja de asistencia.
+              </p>
+            </div>
+
+            <div class="id-showcase-box" style="margin-bottom: 1rem; padding: 0.8rem 0.9rem;">
+              <span class="id-showcase-label">TU ID DE ACCESO (APÚNTALO O CÓPIALO)</span>
+              <div class="id-showcase-digits" id="register-generated-id" style="font-size: 1.65rem;">0000-0000</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-register-id">
+                Copiar mi ID de 8 dígitos
+              </button>
+            </div>
+          </div>
+
+          <!-- Pane 2: Existing Worker Login by 8-Digit Numeric ID -->
+          <div id="pane-auth-id" hidden>
+            <div class="field">
+              <label class="field-label" for="input-worker-id">Tu ID de trabajador (8 dígitos)</label>
+              <input
+                type="text"
+                id="input-worker-id"
+                class="input-text input-mono input-id-code"
+                inputmode="numeric"
+                pattern="[0-9\-\s]*"
+                placeholder="Ej. 4829-1034"
+                autocomplete="off"
+                maxlength="9"
+              >
+              <p class="field-hint">
+                Ingresa tus 8 números para cargar tu nombre oficial en este celular.
+              </p>
+            </div>
+
+            <!-- Shown only if the 8-digit ID is valid but used for the first time on a brand-new Sheet -->
+            <div class="field" id="login-bind-name-box" hidden>
+              <label class="field-label" for="input-bind-worker-name">Nombre completo (1ª vez en esta hoja)</label>
+              <input
+                type="text"
+                id="input-bind-worker-name"
+                class="input-text"
+                placeholder="Ej. Juan Pérez López"
+                autocomplete="name"
+                maxlength="80"
+              >
+              <p class="field-hint">
+                Esta hoja es nueva y aún no tiene registrado tu ID. Escribe tu nombre una sola vez para conservar tu mismo ID de 8 dígitos.
+              </p>
+            </div>
           </div>
 
           <label class="checkbox-card" for="input-privacy-accept">
@@ -183,7 +241,7 @@
           </label>
 
           <button type="submit" class="btn btn-emerald btn-block" id="btn-save-worker">
-            Guardar y abrir checador
+            Crear mi ID y entrar
           </button>
 
           <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-register" style="margin-top: 0.65rem;">
@@ -205,8 +263,15 @@
             <span id="checador-org-name">—</span>
           </span>
           <h1 class="worker-display-name" id="checador-worker-name">—</h1>
+          <div class="worker-id-row">
+            <button type="button" class="worker-id-chip" id="btn-copy-worker-id" title="Toca para copiar tu ID de 8 dígitos">
+              <span class="worker-id-prefix">ID</span>
+              <span id="checador-worker-id">----</span>
+              <span class="worker-id-copy-tag" id="worker-id-copy-tag">Copiar</span>
+            </button>
+          </div>
         </div>
-        <button type="button" class="btn-card-options" id="btn-card-options" aria-label="Abrir opciones de hoja o trabajador">
+        <button type="button" class="btn-card-options" id="btn-card-options" aria-label="Abrir opciones de sesión y hoja">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3"></circle>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -413,8 +478,11 @@
               </div>
               <div class="deploy-fields-box" style="margin-top: 0.65rem; background-color: #ECFDF5; border-color: #A7F3D0; color: #064E3B;">
                 <div>
-                  <strong>Pestañas mensuales, diseño automático y sello HMAC incluidos:</strong>
-                  tu archivo de Google Sheets sigue siendo <strong>100% privado</strong> (los trabajadores nunca pueden verlo ni abrirlo). El script crea automáticamente una pestaña formateada por cada mes (ej. <em>Octubre 2026</em>, <em>Noviembre 2026</em>, colocando siempre el mes actual al inicio) y firma cada fila con un sello <code>HMAC-SHA256</code> auditable desde el menú <strong>&#128737;&#65039; Cronos</strong> en Google Sheets.
+                  <strong>Pestañas mensuales, directorio de trabajadores, rastreo de celulares y sello HMAC incluidos:</strong>
+                  tu archivo de Google Sheets sigue siendo <strong>100% privado</strong>. El script crea automáticamente:
+                  <strong>1)</strong> una pestaña por cada mes (ej. <em>Noviembre 2026</em>, siempre al inicio),
+                  <strong>2)</strong> la pestaña <strong>Trabajadores</strong> que asigna un <strong>ID numérico de 8 dígitos</strong>, congela el nombre de cada empleado y registra la lista de celulares únicos utilizados (alertando si alguien ficha desde el celular de un compañero), y
+                  <strong>3)</strong> firma cada fila con un sello <code>HMAC-SHA256</code> auditable desde el menú <strong>&#128737;&#65039; Cronos</strong>.
                 </div>
               </div>
             </li>
@@ -553,6 +621,10 @@
           <span class="receipt-row-val" id="success-worker">—</span>
         </div>
         <div class="receipt-row">
+          <span class="receipt-row-label">ID Trabajador</span>
+          <span class="receipt-row-val" id="success-worker-id">—</span>
+        </div>
+        <div class="receipt-row">
           <span class="receipt-row-label">Empresa</span>
           <span class="receipt-row-val" id="success-org">—</span>
         </div>
@@ -604,39 +676,45 @@
   </div>
 
   <!-- =====================================================================
-       MODAL 3: OPCIONES DE HOJA Y USUARIO (1-Step QR Switch, Edit Name, Unlink)
+       MODAL 3: OPCIONES DE SESIÓN Y HOJA (Cambiar QR/Hoja, Cambiar sesión, Cerrar sesión)
        ===================================================================== -->
   <div class="modal-backdrop" id="modal-account" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" hidden>
     <div class="modal-card">
       <div class="card-body" style="padding-bottom: 0.75rem;">
-        <span class="eyebrow">Ajustes de este celular</span>
+        <span class="eyebrow">Opciones</span>
         <h2 class="view-title" id="account-modal-title" style="font-size: 1.22rem; margin-bottom: 0.2rem;">
-          Opciones de hoja y usuario
+          Sesión y hoja activa
         </h2>
         <p class="view-lead" id="account-modal-sub" style="font-size: 0.87rem; margin-bottom: 0.95rem;"></p>
 
         <div style="display: flex; flex-direction: column; gap: 0.65rem;">
           <button type="button" class="option-card-btn is-featured" id="btn-switch-qr">
             <span class="option-card-head">
-              <span class="option-card-title">Cambiar QR / Hoja de asistencia</span>
-              <span class="option-pill">Conserva tu nombre</span>
+              <span class="option-card-title">Cambiar QR / Hoja</span>
+              <span class="option-pill">Mantiene tu sesión</span>
             </span>
             <span class="option-card-desc" id="desc-switch-qr">
-              Escanea otro QR o pega un nuevo enlace (ej. cambio de año o nueva hoja de tu empresa) sin volver a escribir tu nombre.
+              Escanea un nuevo QR (ej. nueva hoja anual) conservando tu nombre e ID actual.
             </span>
           </button>
 
           <button type="button" class="option-card-btn" id="btn-change-worker">
-            <span class="option-card-title">Editar mi nombre</span>
+            <span class="option-card-head">
+              <span class="option-card-title">Cambiar sesión</span>
+              <span class="option-pill is-neutral">Misma empresa</span>
+            </span>
             <span class="option-card-desc" id="desc-change-worker">
-              Corrige cómo aparece tu nombre o cámbialo si otro compañero usará este teléfono en la misma hoja.
+              Permite que otro trabajador ingrese con su ID de 8 dígitos en esta misma hoja.
             </span>
           </button>
 
-          <button type="button" class="option-card-btn" id="btn-unlink-company">
-            <span class="option-card-title" id="title-unlink-company">Salir / Desvincular este celular</span>
+          <button type="button" class="option-card-btn is-danger" id="btn-unlink-company">
+            <span class="option-card-head">
+              <span class="option-card-title" id="title-unlink-company">Cerrar sesión</span>
+              <span class="option-pill is-danger-pill">Borra datos</span>
+            </span>
             <span class="option-card-desc" id="desc-unlink-company">
-              Cierra la sesión en este teléfono sin afectar tus asistencias ya enviadas. Puedes volver a escanear este o cualquier otro QR cuando quieras.
+              Borra y desvincula de este celular la empresa (QR/Sheets), tu usuario y tu sesión.
             </span>
           </button>
         </div>
@@ -645,6 +723,37 @@
       <div class="modal-footer" style="padding-top: 0.5rem;">
         <button type="button" class="btn btn-secondary btn-block" id="btn-close-account">
           Cerrar menú
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL 4: TARJETA DE NUEVO ID DE TRABAJADOR (8 DÍGITOS)
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-worker-id" role="dialog" aria-modal="true" aria-labelledby="worker-id-modal-title" hidden>
+    <div class="modal-card">
+      <div class="card-body" style="padding-bottom: 0.6rem;">
+        <span class="eyebrow" style="color: var(--action-in);">Guarda este número · No lo pierdas</span>
+        <h2 class="view-title" id="worker-id-modal-title" style="font-size: 1.25rem;">
+          Tu ID único de acceso
+        </h2>
+        <p class="view-lead" style="font-size: 0.89rem; margin-bottom: 0.85rem;">
+          Tu nombre (<strong id="modal-id-worker-name">—</strong>) quedó congelado a este ID de 8 dígitos. Si cambias de celular o necesitas checar desde otro teléfono, usa <strong>Cambiar sesión</strong> e ingresa este número:
+        </p>
+
+        <div class="id-showcase-box">
+          <span class="id-showcase-label">ID DE TRABAJADOR (8 DÍGITOS)</span>
+          <div class="id-showcase-digits" id="modal-id-digits">0000-0000</div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-modal-copy-id">
+            Copiar mi ID
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-emerald btn-block" id="btn-close-worker-id">
+          Ya lo guardé, ir al checador
         </button>
       </div>
     </div>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cronos-shell-v5';
+const CACHE_NAME = 'cronos-shell-v6';
 
 const APP_SHELL = [
   './',
