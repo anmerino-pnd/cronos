@@ -3,18 +3,33 @@
  * CRONOS · Conector Serverless para Google Sheets
  * - Creación automática de pestaña por mes ("Octubre 2026", "Noviembre 2026"...)
  *   colocando siempre el mes en curso como primera pestaña a la izquierda
+ * - Pestaña automática "📊 Resumen Mensual" con KPIs en vivo (horas trabajadas,
+ *   turnos cerrados, trabajadores en turno y alertas)
  * - Pestaña automática "Trabajadores" con ID numérico de 8 dígitos, nombre
- *   congelado (sin variaciones) e historial numerado de celulares por empleado
- * - Perfil de Administrador con creación de nuevos archivos de Google Sheets en
- *   1 clic (con opción de migrar la tabla de Trabajadores al nuevo archivo)
- * - Diseño ejecutivo automático desde el primer registro (columnas, colores, links)
+ *   congelado, historial numerado de celulares y columna desplegable "Estatus de Acceso"
+ *   (🟢 Activo / 🟡 Pendiente / 🔴 Baja) para aprobación y bloqueo de ex-trabajadores
+ * - Perfil de Administrador protegido contra fuerza bruta (límite de 5 intentos
+ *   fallidos con bloqueo temporal exponencial) y creación de hojas en 1 clic
+ * - Auditoría de telemetría GPS, soporte para Cola Offline y Modo Kiosco
  * - Sello criptográfico encadenado por mes (HMAC-SHA256) contra ediciones manuales
- * - Detección en tiempo real (onEdit) y auditoría por hoja o global desde menú "Cronos"
  * ============================================================================
  */
 
 const CRONOS_LEGACY_SHEET_NAME = "Registros de Asistencia";
 const CRONOS_WORKERS_SHEET_NAME = "Trabajadores";
+const CRONOS_SUMMARY_SHEET_NAME = "📊 Resumen Mensual";
+
+const CRONOS_WORKER_STATUS_ACTIVO = "🟢 Activo";
+const CRONOS_WORKER_STATUS_PENDIENTE = "🟡 Pendiente";
+const CRONOS_WORKER_STATUS_BAJA = "🔴 Baja";
+const CRONOS_WORKER_STATUS_OPTIONS = [
+  CRONOS_WORKER_STATUS_ACTIVO,
+  CRONOS_WORKER_STATUS_PENDIENTE,
+  CRONOS_WORKER_STATUS_BAJA
+];
+
+const CRONOS_ADMIN_MAX_ATTEMPTS = 5;
+const CRONOS_ADMIN_BASE_LOCK_MINUTES = 15;
 
 const CRONOS_MESES_ES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -40,7 +55,7 @@ const CRONOS_COL_WIDTHS = [
   125, // B: ID Trabajador
   210, // C: Trabajador
   135, // D: Tipo de Registro
-  255, // E: Dispositivo / Auditoría
+  265, // E: Dispositivo / Auditoría
   155, // F: Mapa (Ubicación)
   120, // G: Precisión GPS
   185, // H: Coordenadas
@@ -56,17 +71,47 @@ const CRONOS_WORKERS_HEADERS = [
   "Celular Titular (1er registro)",
   "Historial de Celulares Usados",
   "Fecha de Alta",
-  "Último Registro"
+  "Último Registro",
+  "Estatus de Acceso"
 ];
 
 const CRONOS_WORKERS_COL_WIDTHS = [
-  165, // A: ID de Acceso
-  230, // B: Nombre Completo (Congelado)
-  225, // C: Estado de Dispositivos
-  235, // D: Celular Titular
-  340, // E: Historial de Celulares Usados
-  165, // F: Fecha de Alta
-  205  // G: Último Registro
+  160, // A: ID de Acceso
+  225, // B: Nombre Completo (Congelado)
+  220, // C: Estado de Dispositivos
+  230, // D: Celular Titular
+  330, // E: Historial de Celulares Usados
+  160, // F: Fecha de Alta
+  200, // G: Último Registro
+  170  // H: Estatus de Acceso (Dropdown: 🟢 Activo / 🟡 Pendiente / 🔴 Baja)
+];
+
+const CRONOS_SUMMARY_TABLE_HEADERS = [
+  "ID Trabajador",
+  "Trabajador",
+  "Estatus de Acceso",
+  "Días Asistidos",
+  "Entradas",
+  "Salidas",
+  "Turnos Cerrados",
+  "Horas Trabajadas (Mes)",
+  "Promedio / Turno",
+  "Alertas de Celular / GPS",
+  "Estado Actual / Última Marca"
+];
+
+const CRONOS_SUMMARY_COL_WIDTHS = [
+  135, // A: ID Trabajador
+  215, // B: Trabajador
+  155, // C: Estatus de Acceso
+  130, // D: Días Asistidos
+  110, // E: Entradas
+  110, // F: Salidas
+  135, // G: Turnos Cerrados
+  175, // H: Horas Trabajadas (Mes)
+  145, // I: Promedio / Turno
+  190, // J: Alertas de Celular / GPS
+  265  // K: Estado Actual / Última Marca
 ];
 
 /**
@@ -78,13 +123,14 @@ function onOpen() {
     .addItem("🔍 Auditar pestaña actual (HMAC)", "verificarIntegridadCronos")
     .addItem("🗂️ Auditar todos los meses", "verificarTodosLosMesesCronos")
     .addSeparator()
+    .addItem("📊 Actualizar Resumen Mensual (KPIs)", "actualizarResumenMensualManualCronos")
     .addItem("🎨 Reaplicar diseño visual a esta pestaña", "reaplicarDisenoCronos")
     .addToUi();
 }
 
 /**
- * Webhook principal que recibe registros de asistencia, inicios de sesión por ID
- * y comandos del Perfil de Administrador (creación de nuevas hojas en 1 clic).
+ * Webhook principal que recibe registros de asistencia, inicios de sesión por ID,
+ * solicitudes de alta de trabajadores y comandos del Perfil de Administrador.
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
@@ -103,7 +149,7 @@ function doPost(e) {
     const sheetTimeZone = spreadsheet.getSpreadsheetTimeZone();
     const localTime = Utilities.formatDate(now, sheetTimeZone, "yyyy-MM-dd HH:mm:ss");
 
-    // 1. Flujo de Perfil de Administrador: Autenticación y listado de hojas
+    // 1. Flujo de Perfil de Administrador: Autenticación y listado de hojas + trabajadores
     if (action === "admin_auth") {
       const authRes = gestionarAutenticacionAdmin_(data, localTime);
       authRes.localTime = localTime;
@@ -121,7 +167,25 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 3. Flujo de inicio de sesión por ID numérico de 8 dígitos ("Cambiar sesión")
+    // 3. Flujo de Administrador: Listar trabajadores y solicitudes de una hoja
+    if (action === "admin_list_workers") {
+      const listRes = listarTrabajadoresDesdeAdmin_(spreadsheet, data);
+      listRes.localTime = localTime;
+      listRes.timeZone = sheetTimeZone;
+      return ContentService.createTextOutput(JSON.stringify(listRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 4. Flujo de Administrador: Aprobar, dar de baja o reactivar a un trabajador en 1 clic
+    if (action === "admin_set_worker_status") {
+      const statusRes = cambiarEstatusTrabajadorDesdeAdmin_(spreadsheet, data, localTime);
+      statusRes.localTime = localTime;
+      statusRes.timeZone = sheetTimeZone;
+      return ContentService.createTextOutput(JSON.stringify(statusRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 5. Flujo de inicio de sesión por ID numérico de 8 dígitos ("Ya tengo mi ID" / Kiosco / Verificar aprobación)
     if (action === "login_worker") {
       const loginRes = iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime);
       loginRes.localTime = localTime;
@@ -131,15 +195,39 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 4. Flujo de alta / sincronización de trabajador en la pestaña "Trabajadores"
+    // 6. Flujo de solicitud de alta / registro inicial de trabajador en pestaña "Trabajadores"
     if (action === "register_worker") {
-      const regRes = sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, "ALTA");
+      const regRes = sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, "SOLICITUD");
+      if (regRes.blocked) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "blocked",
+          action: "register_worker",
+          accountStatus: "baja",
+          accountStatusLabel: CRONOS_WORKER_STATUS_BAJA,
+          message: regRes.message,
+          localTime: localTime,
+          utcTime: utcTime,
+          timeZone: sheetTimeZone
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+      if (regRes.nameTaken) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "name_taken",
+          action: "register_worker",
+          message: regRes.message,
+          localTime: localTime,
+          utcTime: utcTime,
+          timeZone: sheetTimeZone
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
       return ContentService.createTextOutput(JSON.stringify({
         status: "ok",
         action: "register_worker",
         workerId: regRes.workerId,
         formattedWorkerId: regRes.formattedWorkerId,
         workerName: regRes.workerName,
+        accountStatus: regRes.accountStatus,
+        accountStatusLabel: regRes.accountStatusLabel,
         deviceAudit: regRes.deviceAudit,
         deviceLevel: regRes.deviceLevel,
         localTime: localTime,
@@ -148,7 +236,7 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 5. Flujo de registro de asistencia (ENTRADA / SALIDA / PRUEBA)
+    // 7. Flujo de registro de asistencia (ENTRADA / SALIDA / PRUEBA)
     const infoMes = resolverInfoMesDesdeFechaLocal_(localTime);
     const sheet = obtenerHojaMensualCronos_(spreadsheet, infoMes.nombreHoja);
 
@@ -172,12 +260,64 @@ function doPost(e) {
 
     if (type !== "PRUEBA") {
       const syncInfo = sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, type);
+
+      // Si el trabajador o su dispositivo fue dado de baja -> rechazar sin escribir en la hoja del mes
+      if (syncInfo.blocked) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "blocked",
+          accountStatus: "baja",
+          accountStatusLabel: CRONOS_WORKER_STATUS_BAJA,
+          workerId: syncInfo.workerId || "",
+          formattedWorkerId: syncInfo.formattedWorkerId || "",
+          workerName: syncInfo.workerName || workerName,
+          message: syncInfo.message || "Esta cuenta de trabajador fue dada de baja por el administrador."
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // Si el trabajador está pendiente de aprobación -> rechazar sin escribir en la hoja del mes
+      if (syncInfo.pending) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "pending_approval",
+          accountStatus: "pendiente",
+          accountStatusLabel: CRONOS_WORKER_STATUS_PENDIENTE,
+          workerId: syncInfo.workerId || "",
+          formattedWorkerId: syncInfo.formattedWorkerId || "",
+          workerName: syncInfo.workerName || workerName,
+          message: syncInfo.message || "Tu solicitud de acceso está pendiente de aprobación por el administrador."
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
       workerId = syncInfo.workerId;
       formattedWorkerId = syncInfo.formattedWorkerId;
       workerName = syncInfo.workerName; // Nombre oficial congelado desde pestaña "Trabajadores"
       deviceAudit = syncInfo.deviceAudit;
       deviceLevel = syncInfo.deviceLevel;
       deviceNote = syncInfo.deviceNote || "";
+
+      // Si proviene de Modo Kiosco
+      if (data.isKiosk === true) {
+        const cleanDev = extraerDeviceIdLimpio_(data.deviceId);
+        deviceAudit = "🖥️ Kiosco (" + cleanDev + ")";
+        deviceNote = (deviceNote ? deviceNote + "\n" : "") + "🖥️ Registro realizado desde terminal en Modo Kiosco.";
+      }
+
+      // Si proviene de la Cola Offline, anexar hora de captura original en auditoría
+      if (data.offlineQueuedAt) {
+        const qShort = String(data.offlineQueuedAt).replace("T", " ").slice(0, 16);
+        deviceAudit += " · 📴 Offline (" + qShort + ")";
+        deviceNote = (deviceNote ? deviceNote + "\n" : "") +
+          "📴 COLA OFFLINE: Capturado sin internet el " + String(data.offlineQueuedAt) + " y sincronizado a las " + localTime + ".";
+      }
+
+      // Auditoría de telemetría GPS contra coordenadas estáticas/emuladas
+      const gpsTelemetria = evaluarTelemetriaGps_(sheet, formattedWorkerId, coords, data);
+      if (gpsTelemetria.suspicious) {
+        deviceAudit += " · " + gpsTelemetria.badge;
+        deviceNote = (deviceNote ? deviceNote + "\n" : "") + gpsTelemetria.note;
+        if (deviceLevel === "primary") {
+          deviceLevel = "secondary";
+        }
+      }
     }
 
     // Determinar secuencia y sello de la fila anterior dentro de la hoja del mes
@@ -248,8 +388,19 @@ function doPost(e) {
       JSON.stringify({ ym: infoMes.ymCodigo, sheetName: infoMes.nombreHoja, count: seq, lastSeal: seal })
     );
 
+    // Actualizar pestaña automática "📊 Resumen Mensual" con KPIs en vivo
+    if (type !== "PRUEBA") {
+      try {
+        actualizarHojaResumenMensual_(spreadsheet, sheet, localTime);
+      } catch (_) {}
+    }
+
+    const folio = "#" + String(seq).padStart(4, "0");
+
     return ContentService.createTextOutput(JSON.stringify({
       status: "ok",
+      folio: folio,
+      seq: seq,
       localTime: localTime,
       utcTime: utcTime,
       timeZone: sheetTimeZone,
@@ -258,6 +409,9 @@ function doPost(e) {
       workerId: workerId,
       formattedWorkerId: formattedWorkerId,
       workerName: workerName,
+      accountStatus: "activo",
+      accountStatusLabel: CRONOS_WORKER_STATUS_ACTIVO,
+      lastPunchType: type,
       deviceAudit: deviceAudit,
       deviceLevel: deviceLevel,
       seal: seal
@@ -271,6 +425,44 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Evalúa telemetría GPS para detectar posibles coordenadas estáticas o emuladas desde PC.
+ */
+function evaluarTelemetriaGps_(sheet, formattedWorkerId, currentCoords, data) {
+  const result = { suspicious: false, badge: "", note: "" };
+  try {
+    if (!data || data.rawAccuracy === undefined) return result;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return result;
+
+    // Revisar las últimas marcas del mismo trabajador en la hoja del mes
+    const startRow = Math.max(2, lastRow - 30);
+    const numRows = lastRow - startRow + 1;
+    const rows = sheet.getRange(startRow, 1, numRows, 8).getValues();
+
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const rowWorkerId = String(rows[i][1] || "").trim();
+      const prevCoords = String(rows[i][7] || "").trim();
+      if (rowWorkerId === formattedWorkerId && prevCoords) {
+        const rawAcc = Number(data.rawAccuracy);
+        const isExactIntegerAcc = Number.isFinite(rawAcc) && rawAcc > 0 && Math.floor(rawAcc) === rawAcc;
+        const isDesktop = /windows|macintosh|linux x86/i.test(String(data.deviceLabel || "")) && !data.isKiosk;
+
+        if (prevCoords === currentCoords && isExactIntegerAcc && isDesktop) {
+          result.suspicious = true;
+          result.badge = "⚠️ GPS estático/emulado";
+          result.note =
+            "⚠️ TELEMETRÍA GPS: Las coordenadas (" + currentCoords + ") son idénticas (0.0 m de deriva) " +
+            "respecto a la marca anterior de este trabajador y presentan firma de emulador de escritorio.";
+        }
+        break;
+      }
+    }
+  } catch (_) {}
+  return result;
 }
 
 /**
@@ -328,7 +520,7 @@ function obtenerClaveCabezaCadena_(spreadsheet, sheet) {
 }
 
 /* ============================================================================
-   Perfil de Administrador: Autenticación y Creación de Nuevas Hojas en 1 Clic
+   Perfil de Administrador: Protección Anti-Fuerza Bruta, Autenticación y Hojas
    ============================================================================ */
 
 function calcularHashPinAdmin_(rawPin, secret) {
@@ -344,6 +536,103 @@ function calcularHashPinAdmin_(rawPin, secret) {
       return (v < 16 ? "0" : "") + v.toString(16);
     })
     .join("");
+}
+
+/**
+ * Verifica si la cuenta de Administrador se encuentra bloqueada temporalmente por intentos fallidos,
+ * o registra un nuevo intento fallido / exitoso en PropertiesService.
+ */
+function verificarEstadoBloqueoAdmin_() {
+  const props = PropertiesService.getScriptProperties();
+  const lockUntil = Number(props.getProperty("CRONOS_ADMIN_LOCKOUT_UNTIL") || "0");
+  const nowMs = new Date().getTime();
+
+  if (lockUntil > nowMs) {
+    const remainingMin = Math.max(1, Math.ceil((lockUntil - nowMs) / 60000));
+    return {
+      locked: true,
+      remainingMinutes: remainingMin,
+      attemptsRemaining: 0,
+      message:
+        "🔒 Acceso de Administrador bloqueado temporalmente por seguridad tras múltiples intentos fallidos. " +
+        "Intenta nuevamente en " + remainingMin + " minuto(s)."
+    };
+  }
+  return { locked: false, remainingMinutes: 0 };
+}
+
+function registrarIntentoFallidoAdmin_(customPrefix) {
+  const props = PropertiesService.getScriptProperties();
+  const failCount = Number(props.getProperty("CRONOS_ADMIN_FAIL_COUNT") || "0") + 1;
+
+  if (failCount >= CRONOS_ADMIN_MAX_ATTEMPTS) {
+    const strikes = Number(props.getProperty("CRONOS_ADMIN_LOCKOUT_STRIKES") || "0") + 1;
+    const lockMinutes = CRONOS_ADMIN_BASE_LOCK_MINUTES * Math.pow(2, Math.min(strikes - 1, 3));
+    const lockUntil = new Date().getTime() + lockMinutes * 60000;
+
+    props.setProperty("CRONOS_ADMIN_FAIL_COUNT", "0");
+    props.setProperty("CRONOS_ADMIN_LOCKOUT_STRIKES", String(strikes));
+    props.setProperty("CRONOS_ADMIN_LOCKOUT_UNTIL", String(lockUntil));
+
+    return {
+      status: "auth_locked",
+      locked: true,
+      hasPin: true,
+      attemptsRemaining: 0,
+      remainingMinutes: lockMinutes,
+      message:
+        "🔒 Se alcanzaron " + CRONOS_ADMIN_MAX_ATTEMPTS + " intentos fallidos. " +
+        "Por seguridad, el acceso de Administrador y la creación de archivos quedaron bloqueados durante " +
+        lockMinutes + " minutos."
+    };
+  }
+
+  const remaining = CRONOS_ADMIN_MAX_ATTEMPTS - failCount;
+  props.setProperty("CRONOS_ADMIN_FAIL_COUNT", String(failCount));
+
+  return {
+    status: "auth_error",
+    locked: false,
+    hasPin: true,
+    attemptsRemaining: remaining,
+    message:
+      (customPrefix || "El PIN de 4 números de Administrador es incorrecto.") +
+      " Intentos restantes antes del bloqueo temporal: " + remaining + "."
+  };
+}
+
+function limpiarIntentosFallidosAdmin_() {
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty("CRONOS_ADMIN_FAIL_COUNT");
+  props.deleteProperty("CRONOS_ADMIN_LOCKOUT_UNTIL");
+  props.deleteProperty("CRONOS_ADMIN_LOCKOUT_STRIKES");
+}
+
+function validarCredencialesAdmin_(profile, inputPin, secret) {
+  const lockCheck = verificarEstadoBloqueoAdmin_();
+  if (lockCheck.locked) {
+    return {
+      ok: false,
+      response: {
+        status: "auth_locked",
+        locked: true,
+        hasPin: true,
+        attemptsRemaining: 0,
+        remainingMinutes: lockCheck.remainingMinutes,
+        message: lockCheck.message
+      }
+    };
+  }
+
+  if (!inputPin || !/^\d{4}$/.test(inputPin) || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
+    return {
+      ok: false,
+      response: registrarIntentoFallidoAdmin_("El PIN de 4 números de Administrador es incorrecto.")
+    };
+  }
+
+  limpiarIntentosFallidosAdmin_();
+  return { ok: true };
 }
 
 function obtenerCatalogoHojasAdmin_(defaultOrgName, localTime) {
@@ -410,7 +699,37 @@ function generarIdAdminUnico_(usedIdsMap) {
   return "9" + String(Math.floor(1000000 + Math.random() * 8999999));
 }
 
+function serializarDirectorioParaAdmin_(workersSheet) {
+  const dir = leerDirectorioTrabajadores_(workersSheet);
+  return dir.rows.map(function (r) {
+    return {
+      workerId: r.workerId,
+      formattedWorkerId: r.formattedId,
+      workerName: r.workerName,
+      deviceStatus: r.statusText,
+      primaryDevice: r.primaryCell,
+      createdAt: r.createdAt,
+      lastSeen: r.lastSeen,
+      accountStatus: r.accountStatus,
+      accountStatusLabel: r.accountStatusLabel,
+      isAdmin: r.workerId.indexOf("9") === 0
+    };
+  });
+}
+
 function gestionarAutenticacionAdmin_(data, localTime) {
+  const lockCheck = verificarEstadoBloqueoAdmin_();
+  if (lockCheck.locked) {
+    return {
+      status: "auth_locked",
+      locked: true,
+      hasPin: true,
+      attemptsRemaining: 0,
+      remainingMinutes: lockCheck.remainingMinutes,
+      message: lockCheck.message
+    };
+  }
+
   const props = PropertiesService.getScriptProperties();
   const secret = obtenerSecretoHmac_();
   const inputPin = String(data.adminPin || "").trim();
@@ -460,8 +779,9 @@ function gestionarAutenticacionAdmin_(data, localTime) {
         createdAt: localTime
       };
       props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
+      limpiarIntentosFallidosAdmin_();
 
-      // Registrar al Admin en la pestaña Trabajadores para reservar su ID y habilitar su Checador
+      // Registrar al Admin en la pestaña Trabajadores (siempre en 🟢 Activo)
       sincronizarTrabajadorYDispositivo_(
         primarySs,
         {
@@ -469,7 +789,8 @@ function gestionarAutenticacionAdmin_(data, localTime) {
           workerName: finalAdminName,
           deviceId: data.deviceId || "CEL-ADMIN001",
           deviceLabel: data.deviceLabel || "Admin",
-          preserveExistingId: true
+          preserveExistingId: true,
+          autoApprove: true
         },
         localTime,
         "ADMIN"
@@ -486,17 +807,15 @@ function gestionarAutenticacionAdmin_(data, localTime) {
       adminId: profile ? (profile.adminId || "") : "",
       formattedAdminId: profile && profile.adminId ? formatearIdTrabajador_(profile.adminId) : "",
       adminName: profile ? (profile.adminName || "") : "",
-      sheets: sheets
+      sheets: sheets,
+      workers: serializarDirectorioParaAdmin_(workersSheet)
     };
   }
 
-  // Si ya tiene PIN configurado, validar PIN de 4 números
-  if (!inputPin || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
-    return {
-      status: "auth_error",
-      hasPin: true,
-      message: "El PIN de 4 números de Administrador es incorrecto."
-    };
+  // Si ya tiene PIN configurado, validar con protección anti-fuerza bruta
+  const pinValidation = validarCredencialesAdmin_(profile, inputPin, secret);
+  if (!pinValidation.ok) {
+    return pinValidation.response;
   }
 
   // Si inició sesión por ID de Admin, verificar que coincida (o actualizar perfil heredado si no tenía adminId)
@@ -510,11 +829,7 @@ function gestionarAutenticacionAdmin_(data, localTime) {
     profile.adminName = inputAdminName || profile.adminName || "Administrador";
     props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
   } else if (data.loginById === true && requestedAdminId && requestedAdminId !== profile.adminId) {
-    return {
-      status: "auth_error",
-      hasPin: true,
-      message: "El ID de Administrador de 8 dígitos no coincide con el registrado en este conector."
-    };
+    return registrarIntentoFallidoAdmin_("El ID de Administrador de 8 dígitos no coincide con el registrado en este conector.");
   }
 
   // Sincronizar también en la pestaña Trabajadores para que el Admin pueda checar asistencia
@@ -526,7 +841,8 @@ function gestionarAutenticacionAdmin_(data, localTime) {
         workerName: profile.adminName,
         deviceId: data.deviceId || "CEL-ADMIN001",
         deviceLabel: data.deviceLabel || "Admin",
-        preserveExistingId: true
+        preserveExistingId: true,
+        autoApprove: true
       },
       localTime,
       "ADMIN"
@@ -534,6 +850,9 @@ function gestionarAutenticacionAdmin_(data, localTime) {
   }
 
   const sheets = obtenerCatalogoHojasAdmin_(inputOrgName, localTime);
+  const targetSs = resolverSpreadsheetObjetivo_(data);
+  const targetWorkersSheet = obtenerHojaTrabajadoresCronos_(targetSs);
+
   return {
     status: "ok",
     action: "admin_auth",
@@ -543,16 +862,28 @@ function gestionarAutenticacionAdmin_(data, localTime) {
     adminId: profile.adminId,
     formattedAdminId: formatearIdTrabajador_(profile.adminId),
     adminName: profile.adminName,
-    sheets: sheets
+    sheets: sheets,
+    workers: serializarDirectorioParaAdmin_(targetWorkersSheet)
   };
 }
 
 /**
  * Crea un nuevo archivo de Google Sheets en el Drive del administrador en 1 clic,
  * inicializando la pestaña del mes actual y la pestaña "Trabajadores"
- * (copiando opcionalmente los trabajadores de la hoja anterior si copyWorkers === true).
+ * (copiando opcionalmente los trabajadores de la hoja origen elegida si copyWorkers === true).
  */
 function crearNuevaHojaDesdeAdmin_(data, localTime) {
+  const lockCheck = verificarEstadoBloqueoAdmin_();
+  if (lockCheck.locked) {
+    return {
+      status: "auth_locked",
+      locked: true,
+      attemptsRemaining: 0,
+      remainingMinutes: lockCheck.remainingMinutes,
+      message: lockCheck.message
+    };
+  }
+
   const props = PropertiesService.getScriptProperties();
   const secret = obtenerSecretoHmac_();
   const inputPin = String(data.adminPin || "").trim();
@@ -567,15 +898,13 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
     };
   }
 
-  // Verificar PIN si el perfil de Admin tiene uno configurado
+  // Verificar PIN con límite de intentos fallidos si el perfil de Admin tiene uno configurado
   let profile = leerPerfilAdminGuardado_();
 
   if (profile && profile.pinHash) {
-    if (!inputPin || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
-      return {
-        status: "auth_error",
-        message: "PIN de 4 números de administrador incorrecto para crear una nueva hoja."
-      };
+    const pinValidation = validarCredencialesAdmin_(profile, inputPin, secret);
+    if (!pinValidation.ok) {
+      return pinValidation.response;
     }
   } else if (inputPin && /^\d{4}$/.test(inputPin)) {
     profile = {
@@ -586,6 +915,7 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
     };
     profile.formattedAdminId = formatearIdTrabajador_(profile.adminId);
     props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
+    limpiarIntentosFallidosAdmin_();
   }
 
   const primarySs = SpreadsheetApp.getActiveSpreadsheet();
@@ -602,7 +932,7 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
   obtenerHojaMensualCronos_(newSs, infoMes.nombreHoja);
   const newWorkersSheet = obtenerHojaTrabajadoresCronos_(newSs);
 
-  // 3. Si el administrador marcó la opción, copiar los trabajadores (IDs de 8 dígitos, nombres congelados y celulares)
+  // 3. Si el administrador marcó la opción, copiar los trabajadores de la hoja origen seleccionada
   let workersCopiedCount = 0;
   if (copyWorkers) {
     let sourceSs = primarySs;
@@ -615,23 +945,33 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
     }
     const sourceWorkersSheet = sourceSs.getSheetByName(CRONOS_WORKERS_SHEET_NAME);
     if (sourceWorkersSheet && sourceWorkersSheet.getLastRow() >= 2) {
+      asegurarColumnaEstatusTrabajadores_(sourceWorkersSheet);
       const numWorkers = sourceWorkersSheet.getLastRow() - 1;
-      const workerRows = sourceWorkersSheet.getRange(2, 1, numWorkers, 7).getValues();
+      const workerRows = sourceWorkersSheet.getRange(2, 1, numWorkers, 8).getValues();
       if (workerRows.length > 0) {
-        const targetRange = newWorkersSheet.getRange(2, 1, workerRows.length, 7);
+        const normalizedRows = workerRows.map(function (r) {
+          const rowCopy = r.slice(0, 8);
+          while (rowCopy.length < 8) rowCopy.push("");
+          const stInfo = normalizarEstatusCuentaTrabajador_(rowCopy[7], rowCopy[0]);
+          rowCopy[7] = stInfo.label;
+          return rowCopy;
+        });
+        const targetRange = newWorkersSheet.getRange(2, 1, normalizedRows.length, 8);
         targetRange.setNumberFormat("@");
-        targetRange.setValues(workerRows);
-        for (let i = 0; i < workerRows.length; i++) {
+        targetRange.setValues(normalizedRows);
+        aplicarValidacionEstatusTrabajadores_(newWorkersSheet, 2, normalizedRows.length);
+        for (let i = 0; i < normalizedRows.length; i++) {
           const rIdx = i + 2;
-          const stText = String(workerRows[i][2] || "");
+          const stText = String(normalizedRows[i][2] || "");
           const lvl = stText.indexOf("🚨") !== -1 ? "shared" : (stText.indexOf("⚠️") !== -1 ? "secondary" : "primary");
-          estilizarFilaTrabajador_(newWorkersSheet, rIdx, lvl);
+          const accInfo = normalizarEstatusCuentaTrabajador_(normalizedRows[i][7], normalizedRows[i][0]);
+          estilizarFilaTrabajador_(newWorkersSheet, rIdx, lvl, accInfo.code);
         }
-        workersCopiedCount = workerRows.length;
+        workersCopiedCount = normalizedRows.length;
       }
     }
   } else if (profile && profile.adminId && profile.adminName) {
-    // Incluso si no se copian todos los trabajadores, asegurar que el Admin esté en la nueva hoja para poder checar
+    // Asegurar que el Admin esté en la nueva hoja en estado 🟢 Activo para poder checar
     sincronizarTrabajadorYDispositivo_(
       newSs,
       {
@@ -639,7 +979,8 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
         workerName: profile.adminName,
         deviceId: data.deviceId || "CEL-ADMIN001",
         deviceLabel: data.deviceLabel || "Admin",
-        preserveExistingId: true
+        preserveExistingId: true,
+        autoApprove: true
       },
       localTime,
       "ADMIN"
@@ -670,18 +1011,140 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
     copiedWorkersCount: workersCopiedCount,
     createdSheet: newEntry,
     newSheet: newEntry,
-    sheets: sheets
+    sheets: sheets,
+    workers: serializarDirectorioParaAdmin_(newWorkersSheet)
   };
 }
 
 /**
- * Trigger automático: se dispara SOLO cuando un humano edita celdas manualmente
- * en Google Sheets (nunca cuando escribe el webhook doPost).
+ * Lista los trabajadores y sus estatus de acceso para la hoja seleccionada en el Panel de Admin.
+ */
+function listarTrabajadoresDesdeAdmin_(spreadsheet, data) {
+  const profile = leerPerfilAdminGuardado_();
+  const secret = obtenerSecretoHmac_();
+  const inputPin = String(data.adminPin || "").trim();
+
+  if (profile && profile.pinHash) {
+    const pinValidation = validarCredencialesAdmin_(profile, inputPin, secret);
+    if (!pinValidation.ok) {
+      return pinValidation.response;
+    }
+  }
+
+  const workersSheet = obtenerHojaTrabajadoresCronos_(spreadsheet);
+  return {
+    status: "ok",
+    action: "admin_list_workers",
+    sheetId: obtenerIdSpreadsheetSeguro_(spreadsheet),
+    workers: serializarDirectorioParaAdmin_(workersSheet)
+  };
+}
+
+/**
+ * Permite al Administrador aprobar (🟢 Activo), poner en espera (🟡 Pendiente)
+ * o dar de baja (🔴 Baja) a un trabajador en 1 clic desde el Panel de Admin.
+ */
+function cambiarEstatusTrabajadorDesdeAdmin_(spreadsheet, data, localTime) {
+  const profile = leerPerfilAdminGuardado_();
+  const secret = obtenerSecretoHmac_();
+  const inputPin = String(data.adminPin || "").trim();
+
+  if (profile && profile.pinHash) {
+    const pinValidation = validarCredencialesAdmin_(profile, inputPin, secret);
+    if (!pinValidation.ok) {
+      return pinValidation.response;
+    }
+  }
+
+  const targetWorkerId = normalizarIdTrabajador8_(data.workerId);
+  if (!targetWorkerId) {
+    return {
+      status: "error",
+      message: "ID de trabajador inválido."
+    };
+  }
+
+  if (targetWorkerId.indexOf("9") === 0) {
+    return {
+      status: "error",
+      message: "El perfil de Administrador siempre permanece Activo."
+    };
+  }
+
+  const workersSheet = obtenerHojaTrabajadoresCronos_(spreadsheet);
+  const dir = leerDirectorioTrabajadores_(workersSheet);
+  const record = dir.byId[targetWorkerId];
+
+  if (!record) {
+    return {
+      status: "not_found",
+      message: "No se encontró al trabajador con ID " + formatearIdTrabajador_(targetWorkerId) + " en esta hoja."
+    };
+  }
+
+  const newStatusInfo = normalizarEstatusCuentaTrabajador_(data.newStatus || data.accountStatus, targetWorkerId);
+  const statusTag =
+    newStatusInfo.code === "baja"
+      ? "BAJA POR ADMIN"
+      : (newStatusInfo.code === "pendiente" ? "PENDIENTE" : "APROBADO POR ADMIN");
+
+  workersSheet.getRange(record.rowIndex, 7).setValue(localTime + " (" + statusTag + ")");
+  workersSheet.getRange(record.rowIndex, 8).setValue(newStatusInfo.label);
+  aplicarValidacionEstatusTrabajadores_(workersSheet, record.rowIndex, 1);
+
+  const lvl =
+    record.statusText.indexOf("🚨") !== -1
+      ? "shared"
+      : (record.statusText.indexOf("⚠️") !== -1 ? "secondary" : "primary");
+  estilizarFilaTrabajador_(workersSheet, record.rowIndex, lvl, newStatusInfo.code);
+
+  // Actualizar también la pestaña de Resumen Mensual si existe
+  try {
+    const infoMes = resolverInfoMesDesdeFechaLocal_(localTime);
+    const monthSheet = spreadsheet.getSheetByName(infoMes.nombreHoja);
+    if (monthSheet) {
+      actualizarHojaResumenMensual_(spreadsheet, monthSheet, localTime);
+    }
+  } catch (_) {}
+
+  return {
+    status: "ok",
+    action: "admin_set_worker_status",
+    workerId: record.workerId,
+    formattedWorkerId: record.formattedId,
+    workerName: record.workerName,
+    accountStatus: newStatusInfo.code,
+    accountStatusLabel: newStatusInfo.label,
+    workers: serializarDirectorioParaAdmin_(workersSheet)
+  };
+}
+
+/**
+ * Trigger automático: se dispara cuando un humano edita celdas manualmente en Google Sheets.
+ * - Si edita la pestaña "Trabajadores" (ej. cambia el dropdown de Estatus a 🟢 Activo o 🔴 Baja),
+ *   aplica el color correspondiente a la fila.
+ * - Si edita una pestaña mensual de asistencia, audita el sello HMAC.
  */
 function onEdit(e) {
   try {
     if (!e || !e.range) return;
     const sheet = e.range.getSheet();
+
+    if (esHojaTrabajadoresCronos_(sheet)) {
+      const startRow = Math.max(2, e.range.getRow());
+      const endRow = Math.min(sheet.getLastRow(), e.range.getLastRow());
+      for (let r = startRow; r <= endRow; r++) {
+        const rawId = normalizarIdTrabajador8_(sheet.getRange(r, 1).getValue());
+        if (!rawId) continue;
+        const stText = String(sheet.getRange(r, 3).getValue() || "");
+        const lvl = stText.indexOf("🚨") !== -1 ? "shared" : (stText.indexOf("⚠️") !== -1 ? "secondary" : "primary");
+        const accInfo = normalizarEstatusCuentaTrabajador_(sheet.getRange(r, 8).getValue(), rawId);
+        sheet.getRange(r, 8).setValue(accInfo.label);
+        estilizarFilaTrabajador_(sheet, r, lvl, accInfo.code);
+      }
+      return;
+    }
+
     if (!esHojaCronos_(sheet)) return;
 
     const startRow = Math.max(2, e.range.getRow());
@@ -804,21 +1267,45 @@ function verificarTodosLosMesesCronos() {
 }
 
 /**
- * Reaplica anchos, alturas y diseño visual a la pestaña activa (sea mensual o de Trabajadores).
+ * Permite actualizar manualmente la pestaña "📊 Resumen Mensual" desde el menú superior.
+ */
+function actualizarResumenMensualManualCronos() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const active = spreadsheet.getActiveSheet();
+  const targetMonthSheet = esHojaCronos_(active) ? active : obtenerPrimeraHojaCronos_(spreadsheet);
+  if (!targetMonthSheet || !esHojaCronos_(targetMonthSheet)) {
+    spreadsheet.toast("Aún no existe una pestaña mensual de asistencia para resumir.", "📊 Cronos", 4);
+    return;
+  }
+  const now = new Date();
+  const localTime = Utilities.formatDate(now, spreadsheet.getSpreadsheetTimeZone(), "yyyy-MM-dd HH:mm:ss");
+  actualizarHojaResumenMensual_(spreadsheet, targetMonthSheet, localTime);
+  spreadsheet.toast('Pestaña "' + CRONOS_SUMMARY_SHEET_NAME + '" actualizada con los datos de "' + targetMonthSheet.getName() + '".', "📊 Cronos", 4);
+}
+
+/**
+ * Reaplica anchos, alturas y diseño visual a la pestaña activa.
  */
 function reaplicarDisenoCronos() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = spreadsheet.getActiveSheet();
 
   if (esHojaTrabajadoresCronos_(sheet)) {
+    asegurarColumnaEstatusTrabajadores_(sheet);
     aplicarFormatoBaseTrabajadores_(sheet);
     const lastW = sheet.getLastRow();
     for (let r = 2; r <= lastW; r++) {
       const statusText = String(sheet.getRange(r, 3).getValue() || "");
       const lvl = statusText.indexOf("🚨") !== -1 ? "shared" : (statusText.indexOf("⚠️") !== -1 ? "secondary" : "primary");
-      estilizarFilaTrabajador_(sheet, r, lvl);
+      const accInfo = normalizarEstatusCuentaTrabajador_(sheet.getRange(r, 8).getValue(), sheet.getRange(r, 1).getValue());
+      estilizarFilaTrabajador_(sheet, r, lvl, accInfo.code);
     }
     spreadsheet.toast('Diseño visual reaplicado en "Trabajadores".', "🎨 Cronos", 4);
+    return;
+  }
+
+  if (esHojaResumenCronos_(sheet)) {
+    actualizarResumenMensualManualCronos();
     return;
   }
 
@@ -844,7 +1331,7 @@ function reaplicarDisenoCronos() {
 }
 
 /* ============================================================================
-   Directorio Automático de Trabajadores (ID de 8 dígitos + Serie de Celular)
+   Directorio Automático de Trabajadores (ID de 8 dígitos + Estatus de Acceso)
    ============================================================================ */
 
 function normalizarIdTrabajador8_(raw) {
@@ -856,6 +1343,37 @@ function formatearIdTrabajador_(digits8) {
   const d = normalizarIdTrabajador8_(digits8);
   if (!d) return "SIN-ID";
   return d.slice(0, 4) + "-" + d.slice(4, 8);
+}
+
+function normalizarNombreComparacion_(name) {
+  const s = String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  try {
+    return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  } catch (_) {
+    return s;
+  }
+}
+
+/**
+ * Normaliza el valor de la columna 8 ("Estatus de Acceso") de la pestaña Trabajadores.
+ */
+function normalizarEstatusCuentaTrabajador_(rawCell, rawId) {
+  const cleanId = normalizarIdTrabajador8_(rawId);
+  if (cleanId && cleanId.indexOf("9") === 0) {
+    return { code: "activo", label: CRONOS_WORKER_STATUS_ACTIVO };
+  }
+
+  const txt = String(rawCell || "").trim().toLowerCase();
+  if (!txt) {
+    return { code: "activo", label: CRONOS_WORKER_STATUS_ACTIVO };
+  }
+  if (txt.indexOf("baja") !== -1 || txt.indexOf("bloquead") !== -1 || txt.indexOf("inactiv") !== -1 || txt.indexOf("rechazad") !== -1) {
+    return { code: "baja", label: CRONOS_WORKER_STATUS_BAJA };
+  }
+  if (txt.indexOf("pendiente") !== -1 || txt.indexOf("solicitud") !== -1 || txt.indexOf("espera") !== -1) {
+    return { code: "pendiente", label: CRONOS_WORKER_STATUS_PENDIENTE };
+  }
+  return { code: "activo", label: CRONOS_WORKER_STATUS_ACTIVO };
 }
 
 function generarIdTrabajadorUnico_(usedIdsMap) {
@@ -883,6 +1401,18 @@ function extraerPrimerDeviceIdDeTexto_(cellText) {
   return m ? m[1] : String(cellText || "").trim().split(/\s+/)[0] || "";
 }
 
+function extraerTodosLosDeviceIdsDeRegistro_(record) {
+  const ids = {};
+  if (record.primaryDeviceId) {
+    ids[record.primaryDeviceId] = true;
+  }
+  const matches = String(record.historyText || "").match(/CEL-[A-Za-z0-9\-_]+/g) || [];
+  for (let i = 0; i < matches.length; i++) {
+    ids[matches[i]] = true;
+  }
+  return Object.keys(ids);
+}
+
 function esHojaTrabajadoresCronos_(sheet) {
   if (!sheet) return false;
   if (sheet.getName() === CRONOS_WORKERS_SHEET_NAME) return true;
@@ -890,6 +1420,11 @@ function esHojaTrabajadoresCronos_(sheet) {
     return String(sheet.getRange(1, 1).getValue() || "") === CRONOS_WORKERS_HEADERS[0];
   }
   return false;
+}
+
+function esHojaResumenCronos_(sheet) {
+  if (!sheet) return false;
+  return sheet.getName() === CRONOS_SUMMARY_SHEET_NAME;
 }
 
 function obtenerHojaTrabajadoresCronos_(spreadsheet) {
@@ -902,15 +1437,62 @@ function obtenerHojaTrabajadoresCronos_(spreadsheet) {
   }
   if (sheet.getLastRow() === 0) {
     inicializarHojaTrabajadores_(sheet);
+  } else {
+    asegurarColumnaEstatusTrabajadores_(sheet);
   }
   return sheet;
 }
 
 function inicializarHojaTrabajadores_(sheet) {
   sheet.clear();
-  const headerRange = sheet.getRange(1, 1, 1, 7);
+  const headerRange = sheet.getRange(1, 1, 1, 8);
   headerRange.setValues([CRONOS_WORKERS_HEADERS]);
   aplicarFormatoBaseTrabajadores_(sheet);
+}
+
+/**
+ * Migra de forma transparente cualquier pestaña "Trabajadores" de 7 columnas a 8 columnas
+ * añadiendo "Estatus de Acceso" con desplegable nativo (🟢 Activo por defecto para filas previas).
+ */
+function asegurarColumnaEstatusTrabajadores_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1) return;
+  const col8Header = String(sheet.getRange(1, 8).getValue() || "").trim();
+  if (col8Header !== CRONOS_WORKERS_HEADERS[7]) {
+    sheet.getRange(1, 8).setValue(CRONOS_WORKERS_HEADERS[7]);
+    aplicarFormatoBaseTrabajadores_(sheet);
+  }
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const numRows = lastRow - 1;
+    const col8Range = sheet.getRange(2, 8, numRows, 1);
+    const vals = col8Range.getValues();
+    const ids = sheet.getRange(2, 1, numRows, 1).getValues();
+    let changed = false;
+    for (let i = 0; i < numRows; i++) {
+      if (!String(vals[i][0] || "").trim()) {
+        const st = normalizarEstatusCuentaTrabajador_("", ids[i][0]);
+        vals[i][0] = st.label;
+        changed = true;
+      }
+    }
+    if (changed) {
+      col8Range.setValues(vals);
+    }
+    aplicarValidacionEstatusTrabajadores_(sheet, 2, numRows);
+  }
+}
+
+function aplicarValidacionEstatusTrabajadores_(sheet, startRow, numRows) {
+  if (!sheet || numRows < 1) return;
+  try {
+    if (typeof SpreadsheetApp.newDataValidation === "function") {
+      const rule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(CRONOS_WORKER_STATUS_OPTIONS, true)
+        .setAllowInvalid(false)
+        .build();
+      sheet.getRange(startRow, 8, numRows, 1).setDataValidation(rule);
+    }
+  } catch (_) {}
 }
 
 function aplicarFormatoBaseTrabajadores_(sheet) {
@@ -918,7 +1500,7 @@ function aplicarFormatoBaseTrabajadores_(sheet) {
     sheet.setTabColor("#2563EB");
   } catch (_) {}
 
-  const headerRange = sheet.getRange(1, 1, 1, 7);
+  const headerRange = sheet.getRange(1, 1, 1, 8);
   headerRange
     .setBackground("#0F172A")
     .setFontColor("#FFFFFF")
@@ -940,15 +1522,48 @@ function aplicarFormatoBaseTrabajadores_(sheet) {
 
   if (!sheet.getFilter()) {
     try {
-      sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 1), 7).createFilter();
+      sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 1), 8).createFilter();
     } catch (_) {}
   }
+
+  // Reglas de formato condicional para la columna H (Estatus de Acceso)
+  try {
+    const maxRows = Math.max(sheet.getMaxRows() - 1, 500);
+    const accStatusRange = sheet.getRange(2, 8, maxRows, 1);
+
+    const ruleActivo = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(CRONOS_WORKER_STATUS_ACTIVO)
+      .setBackground("#D1FAE5")
+      .setFontColor("#065F46")
+      .setBold(true)
+      .setRanges([accStatusRange])
+      .build();
+
+    const rulePendiente = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(CRONOS_WORKER_STATUS_PENDIENTE)
+      .setBackground("#FEF3C7")
+      .setFontColor("#92400E")
+      .setBold(true)
+      .setRanges([accStatusRange])
+      .build();
+
+    const ruleBaja = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo(CRONOS_WORKER_STATUS_BAJA)
+      .setBackground("#FEE2E2")
+      .setFontColor("#991B1B")
+      .setBold(true)
+      .setRanges([accStatusRange])
+      .build();
+
+    sheet.setConditionalFormatRules([ruleActivo, rulePendiente, ruleBaja]);
+    aplicarValidacionEstatusTrabajadores_(sheet, 2, maxRows);
+  } catch (_) {}
 }
 
-function estilizarFilaTrabajador_(sheet, rowIndex, level) {
+function estilizarFilaTrabajador_(sheet, rowIndex, level, accountStatusCode) {
   sheet.setRowHeight(rowIndex, 38);
   const rowBg = rowIndex % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
-  const rowRange = sheet.getRange(rowIndex, 1, 1, 7);
+  const rowRange = sheet.getRange(rowIndex, 1, 1, 8);
 
   rowRange
     .setBackground(rowBg)
@@ -994,22 +1609,41 @@ function estilizarFilaTrabajador_(sheet, rowIndex, level) {
     .setFontSize(9)
     .setFontColor("#334155")
     .setWrap(true);
+
+  // Col H: Estatus de Acceso (🟢 Activo / 🟡 Pendiente / 🔴 Baja)
+  const accCell = sheet.getRange(rowIndex, 8);
+  accCell.setFontWeight("bold");
+  if (accountStatusCode === "baja") {
+    accCell.setBackground("#FEE2E2").setFontColor("#991B1B");
+  } else if (accountStatusCode === "pendiente") {
+    accCell.setBackground("#FEF3C7").setFontColor("#92400E");
+  } else {
+    accCell.setBackground("#D1FAE5").setFontColor("#065F46");
+  }
 }
 
 /**
- * Lee el directorio actual de la pestaña "Trabajadores".
+ * Lee el directorio actual de la pestaña "Trabajadores", incluyendo el estatus de acceso
+ * y el mapa de dispositivos bloqueados (asociados a ex-trabajadores dados de baja).
  */
 function leerDirectorioTrabajadores_(workersSheet) {
+  asegurarColumnaEstatusTrabajadores_(workersSheet);
   const lastRow = workersSheet.getLastRow();
   const byId = {};
-  const primaryDeviceOwner = {}; // deviceId -> { workerId, workerName }
+  const primaryDeviceOwner = {}; // deviceId -> { workerId, workerName, accountStatus }
+  const blockedDevices = {}; // deviceId -> { workerId, workerName }
   const rows = [];
 
   if (lastRow < 2) {
-    return { byId: byId, primaryDeviceOwner: primaryDeviceOwner, rows: rows };
+    return {
+      byId: byId,
+      primaryDeviceOwner: primaryDeviceOwner,
+      blockedDevices: blockedDevices,
+      rows: rows
+    };
   }
 
-  const values = workersSheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  const values = workersSheet.getRange(2, 1, lastRow - 1, 8).getValues();
   for (let i = 0; i < values.length; i++) {
     const rIdx = i + 2;
     const rawId = normalizarIdTrabajador8_(values[i][0]);
@@ -1020,6 +1654,7 @@ function leerDirectorioTrabajadores_(workersSheet) {
     const historyText = String(values[i][4] || "").trim();
     const createdAt = String(values[i][5] || "").trim();
     const lastSeen = String(values[i][6] || "").trim();
+    const accInfo = normalizarEstatusCuentaTrabajador_(values[i][7], rawId);
 
     if (!rawId) continue;
 
@@ -1028,12 +1663,15 @@ function leerDirectorioTrabajadores_(workersSheet) {
       workerId: rawId,
       formattedId: formatearIdTrabajador_(rawId),
       workerName: workerName,
+      normalizedName: normalizarNombreComparacion_(workerName),
       statusText: statusText,
       primaryCell: primaryCell,
       primaryDeviceId: primaryDevId,
       historyText: historyText,
       createdAt: createdAt,
-      lastSeen: lastSeen
+      lastSeen: lastSeen,
+      accountStatus: accInfo.code,
+      accountStatusLabel: accInfo.label
     };
 
     byId[rawId] = record;
@@ -1042,16 +1680,60 @@ function leerDirectorioTrabajadores_(workersSheet) {
     if (primaryDevId && !primaryDeviceOwner[primaryDevId]) {
       primaryDeviceOwner[primaryDevId] = {
         workerId: rawId,
-        workerName: workerName
+        workerName: workerName,
+        accountStatus: accInfo.code
       };
+    }
+
+    if (accInfo.code === "baja") {
+      const devList = extraerTodosLosDeviceIdsDeRegistro_(record);
+      for (let d = 0; d < devList.length; d++) {
+        if (devList[d] && devList[d] !== "CEL-DESCONOCIDO") {
+          blockedDevices[devList[d]] = {
+            workerId: rawId,
+            workerName: workerName
+          };
+        }
+      }
     }
   }
 
   return {
     byId: byId,
     primaryDeviceOwner: primaryDeviceOwner,
+    blockedDevices: blockedDevices,
     rows: rows
   };
+}
+
+/**
+ * Obtiene la última marca (ENTRADA o SALIDA) de un trabajador en la pestaña del mes actual
+ * para sincronizar el Estado Inteligente de los botones en el teléfono.
+ */
+function obtenerUltimaMarcaTrabajadorMes_(spreadsheet, formattedWorkerId, localTime) {
+  try {
+    const infoMes = resolverInfoMesDesdeFechaLocal_(localTime);
+    const monthSheet = spreadsheet.getSheetByName(infoMes.nombreHoja);
+    if (!monthSheet || monthSheet.getLastRow() < 2) return null;
+
+    const lastRow = monthSheet.getLastRow();
+    const startRow = Math.max(2, lastRow - 80);
+    const numRows = lastRow - startRow + 1;
+    const vals = monthSheet.getRange(startRow, 1, numRows, 4).getValues();
+
+    for (let i = vals.length - 1; i >= 0; i--) {
+      if (String(vals[i][1] || "").trim() === formattedWorkerId) {
+        const punchType = String(vals[i][3] || "").trim().toUpperCase();
+        if (punchType === "ENTRADA" || punchType === "SALIDA") {
+          return {
+            lastPunchType: punchType,
+            lastPunchTime: String(vals[i][0] || "").trim()
+          };
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
 }
 
 /**
@@ -1138,16 +1820,20 @@ function evaluarYActualizarDispositivoTrabajador_(workersSheet, dir, record, dev
   const updatedHistory = lines.join("\n");
   const updatedLastSeen = localTime + " (" + eventTag + ")";
 
-  workersSheet.getRange(record.rowIndex, 1, 1, 7).setNumberFormat("@");
+  workersSheet.getRange(record.rowIndex, 1, 1, 8).setNumberFormat("@");
   workersSheet.getRange(record.rowIndex, 3).setValue(workerStatusText);
   workersSheet.getRange(record.rowIndex, 5).setValue(updatedHistory);
   workersSheet.getRange(record.rowIndex, 7).setValue(updatedLastSeen);
-  estilizarFilaTrabajador_(workersSheet, record.rowIndex, workerRowLevel);
+  workersSheet.getRange(record.rowIndex, 8).setValue(record.accountStatusLabel);
+  aplicarValidacionEstatusTrabajadores_(workersSheet, record.rowIndex, 1);
+  estilizarFilaTrabajador_(workersSheet, record.rowIndex, workerRowLevel, record.accountStatus);
 
   return {
     workerId: record.workerId,
     formattedWorkerId: record.formattedId,
     workerName: record.workerName, // Nombre congelado
+    accountStatus: record.accountStatus,
+    accountStatusLabel: record.accountStatusLabel,
     deviceAudit: deviceAudit,
     deviceLevel: deviceLevel,
     deviceNote: deviceNote
@@ -1155,8 +1841,8 @@ function evaluarYActualizarDispositivoTrabajador_(workersSheet, dir, record, dev
 }
 
 /**
- * Busca un ID de 8 dígitos en la pestaña "Trabajadores" para iniciar sesión ("Cambiar sesión")
- * y registra el dispositivo utilizado.
+ * Busca un ID de 8 dígitos en la pestaña "Trabajadores" para iniciar sesión ("Ya tengo mi ID" / Kiosco)
+ * validando primero si la cuenta está en 🔴 Baja o 🟡 Pendiente antes de tocar dispositivos.
  */
 function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
   const rawId = normalizarIdTrabajador8_(data.workerId);
@@ -1170,6 +1856,18 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
   // 1. Verificar si el ID de 8 dígitos pertenece al Perfil de Administrador
   const adminProfile = leerPerfilAdminGuardado_();
   if (adminProfile && adminProfile.adminId && adminProfile.adminId === rawId) {
+    const lockCheck = verificarEstadoBloqueoAdmin_();
+    if (lockCheck.locked) {
+      return {
+        status: "auth_locked",
+        isAdmin: true,
+        locked: true,
+        attemptsRemaining: 0,
+        remainingMinutes: lockCheck.remainingMinutes,
+        message: lockCheck.message
+      };
+    }
+
     const inputPin = String(data.adminPin || "").trim();
     if (!inputPin) {
       return {
@@ -1183,18 +1881,20 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
     }
 
     const secret = obtenerSecretoHmac_();
-    if (!/^\d{4}$/.test(inputPin) || calcularHashPinAdmin_(inputPin, secret) !== adminProfile.pinHash) {
-      return {
-        status: "admin_pin_invalid",
-        isAdmin: true,
-        workerId: adminProfile.adminId,
-        formattedWorkerId: formatearIdTrabajador_(adminProfile.adminId),
-        workerName: adminProfile.adminName || "Administrador",
-        message: "El PIN de 4 números de Administrador es incorrecto."
-      };
+    const pinValidation = validarCredencialesAdmin_(adminProfile, inputPin, secret);
+    if (!pinValidation.ok) {
+      const failRes = pinValidation.response;
+      failRes.isAdmin = true;
+      failRes.workerId = adminProfile.adminId;
+      failRes.formattedWorkerId = formatearIdTrabajador_(adminProfile.adminId);
+      failRes.workerName = adminProfile.adminName || "Administrador";
+      if (failRes.status === "auth_error") {
+        failRes.status = "admin_pin_invalid";
+      }
+      return failRes;
     }
 
-    // PIN de Admin válido: sincronizar en Trabajadores (para habilitar su Checador) y devolver catálogo de hojas
+    // PIN de Admin válido: sincronizar en Trabajadores (siempre en 🟢 Activo) y devolver catálogo de hojas
     const syncAdmin = sincronizarTrabajadorYDispositivo_(
       spreadsheet,
       {
@@ -1202,12 +1902,14 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
         workerName: adminProfile.adminName || "Administrador",
         deviceId: data.deviceId,
         deviceLabel: data.deviceLabel,
-        preserveExistingId: true
+        preserveExistingId: true,
+        autoApprove: true
       },
       localTime,
       "SESIÓN ADMIN"
     );
     const sheets = obtenerCatalogoHojasAdmin_("", localTime);
+    const lastPunchInfo = obtenerUltimaMarcaTrabajadorMes_(spreadsheet, syncAdmin.formattedWorkerId, localTime);
 
     return {
       status: "ok",
@@ -1216,6 +1918,10 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
       workerId: syncAdmin.workerId,
       formattedWorkerId: syncAdmin.formattedWorkerId,
       workerName: syncAdmin.workerName,
+      accountStatus: "activo",
+      accountStatusLabel: CRONOS_WORKER_STATUS_ACTIVO,
+      lastPunchType: lastPunchInfo ? lastPunchInfo.lastPunchType : "",
+      lastPunchTime: lastPunchInfo ? lastPunchInfo.lastPunchTime : "",
       deviceAudit: syncAdmin.deviceAudit,
       deviceLevel: syncAdmin.deviceLevel,
       sheets: sheets
@@ -1236,6 +1942,39 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
     };
   }
 
+  // ÁNGULO 1 CUBIERTO: Si el trabajador está dado de 🔴 Baja, rechazar el inicio de sesión de inmediato
+  // (incluso desde una PC o desde el celular de un compañero activo, sin contaminar el celular del compañero)
+  if (record.accountStatus === "baja") {
+    return {
+      status: "blocked",
+      accountStatus: "baja",
+      accountStatusLabel: CRONOS_WORKER_STATUS_BAJA,
+      workerId: record.workerId,
+      formattedWorkerId: record.formattedId,
+      workerName: record.workerName,
+      message:
+        "Esta cuenta de trabajador (" + record.formattedId + " · " + record.workerName + ") " +
+        "fue dada de baja por el administrador y no tiene permiso para iniciar sesión ni registrar asistencia."
+    };
+  }
+
+  // Si está en 🟡 Pendiente, informar su estado sin permitirle checar todavía
+  if (record.accountStatus === "pendiente") {
+    return {
+      status: "pending_approval",
+      accountStatus: "pendiente",
+      accountStatusLabel: CRONOS_WORKER_STATUS_PENDIENTE,
+      workerId: record.workerId,
+      formattedWorkerId: record.formattedId,
+      workerName: record.workerName,
+      deviceAudit: "🟡 Solicitud en revisión",
+      deviceLevel: "secondary",
+      message:
+        "Hola, " + record.workerName + ". Tu solicitud de acceso (" + record.formattedId + ") " +
+        "aún está pendiente de aprobación por el administrador."
+    };
+  }
+
   const deviceId = extraerDeviceIdLimpio_(data.deviceId);
   const deviceLabel = String(data.deviceLabel || "").trim().slice(0, 40);
 
@@ -1249,6 +1988,8 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
     "SESIÓN"
   );
 
+  const lastPunchInfo = obtenerUltimaMarcaTrabajadorMes_(spreadsheet, evalRes.formattedWorkerId, localTime);
+
   return {
     status: "ok",
     action: "login_worker",
@@ -1256,6 +1997,10 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
     workerId: evalRes.workerId,
     formattedWorkerId: evalRes.formattedWorkerId,
     workerName: evalRes.workerName,
+    accountStatus: "activo",
+    accountStatusLabel: CRONOS_WORKER_STATUS_ACTIVO,
+    lastPunchType: lastPunchInfo ? lastPunchInfo.lastPunchType : "",
+    lastPunchTime: lastPunchInfo ? lastPunchInfo.lastPunchTime : "",
     deviceAudit: evalRes.deviceAudit,
     deviceLevel: evalRes.deviceLevel
   };
@@ -1263,7 +2008,7 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
 
 /**
  * Registra o sincroniza al trabajador en la pestaña "Trabajadores", congelando su nombre
- * al primer registro y auditando la serie del celular utilizado.
+ * al primer registro, validando estatus (🟢 Activo / 🟡 Pendiente / 🔴 Baja) y auditando celulares.
  */
 function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventTag) {
   const workersSheet = obtenerHojaTrabajadoresCronos_(spreadsheet);
@@ -1271,20 +2016,53 @@ function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventT
 
   let rawId = normalizarIdTrabajador8_(data.workerId);
   const inputName = String(data.workerName || "Sin nombre").trim().replace(/\s+/g, " ");
+  const normInputName = normalizarNombreComparacion_(inputName);
   const deviceId = extraerDeviceIdLimpio_(data.deviceId);
   const deviceLabel = String(data.deviceLabel || "").trim().slice(0, 40);
   const etiquetaEquipo = deviceLabel ? (deviceId + " (" + deviceLabel + ")") : deviceId;
+  const isAdminOperation =
+    eventTag === "ADMIN" ||
+    eventTag === "SESIÓN ADMIN" ||
+    (rawId && rawId.indexOf("9") === 0) ||
+    data.autoApprove === true;
 
-  // Si enviaron un workerId ya existente en la hoja:
+  // Caso A: Si enviaron un workerId ya existente en la hoja:
   if (rawId && dir.byId[rawId]) {
     const existing = dir.byId[rawId];
+
+    // Si es una cuenta dada de 🔴 Baja -> bloquear cualquier acción o chequeo
+    if (existing.accountStatus === "baja" && !isAdminOperation) {
+      return {
+        blocked: true,
+        accountStatus: "baja",
+        accountStatusLabel: CRONOS_WORKER_STATUS_BAJA,
+        workerId: existing.workerId,
+        formattedWorkerId: existing.formattedId,
+        workerName: existing.workerName,
+        message: "La cuenta de " + existing.workerName + " (" + existing.formattedId + ") fue dada de baja por el administrador."
+      };
+    }
+
     const samePersonOrDevice =
-      existing.workerName.toLowerCase() === inputName.toLowerCase() ||
+      existing.normalizedName === normInputName ||
       existing.primaryDeviceId === deviceId;
 
-    if (eventTag === "ALTA" && !samePersonOrDevice && !data.preserveExistingId) {
+    if ((eventTag === "ALTA" || eventTag === "SOLICITUD") && !samePersonOrDevice && !data.preserveExistingId) {
       rawId = generarIdTrabajadorUnico_(dir.byId);
     } else {
+      // Si intenta hacer ENTRADA/SALIDA pero sigue en 🟡 Pendiente -> bloquear escritura en hoja mensual
+      if (existing.accountStatus === "pendiente" && eventTag !== "ALTA" && eventTag !== "SOLICITUD" && !isAdminOperation) {
+        return {
+          pending: true,
+          accountStatus: "pendiente",
+          accountStatusLabel: CRONOS_WORKER_STATUS_PENDIENTE,
+          workerId: existing.workerId,
+          formattedWorkerId: existing.formattedId,
+          workerName: existing.workerName,
+          message: "Tu perfil (" + existing.formattedId + ") aún está pendiente de aprobación por el administrador."
+        };
+      }
+
       return evaluarYActualizarDispositivoTrabajador_(
         workersSheet,
         dir,
@@ -1297,22 +2075,95 @@ function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventT
     }
   }
 
-  // Si no tenía workerId (o no estaba en la hoja), revisar si el mismo nombre + mismo celular titular ya existe
-  for (let i = 0; i < dir.rows.length; i++) {
-    const r = dir.rows[i];
-    if (
-      r.workerName.toLowerCase() === inputName.toLowerCase() &&
-      r.primaryDeviceId === deviceId
-    ) {
-      return evaluarYActualizarDispositivoTrabajador_(
-        workersSheet,
-        dir,
-        r,
-        deviceId,
-        deviceLabel,
-        localTime,
-        eventTag
-      );
+  // Caso B: Es un intento de nuevo registro o búsqueda por nombre/dispositivo
+  if (!isAdminOperation) {
+    // 1. Verificar si el dispositivo (CEL-XXXX) pertenece a un ex-trabajador dado de 🔴 Baja
+    if (dir.blockedDevices[deviceId]) {
+      const blockedOwner = dir.blockedDevices[deviceId];
+      return {
+        blocked: true,
+        accountStatus: "baja",
+        accountStatusLabel: CRONOS_WORKER_STATUS_BAJA,
+        workerId: blockedOwner.workerId,
+        formattedWorkerId: formatearIdTrabajador_(blockedOwner.workerId),
+        workerName: blockedOwner.workerName,
+        message:
+          "Este dispositivo (" + deviceId + ") está vinculado a una cuenta dada de baja (" +
+          blockedOwner.workerName + ") y no tiene permiso para crear nuevos perfiles ni registrar asistencia."
+      };
+    }
+
+    // 2. Verificar si el nombre ingresado coincide con algún trabajador existente
+    for (let i = 0; i < dir.rows.length; i++) {
+      const r = dir.rows[i];
+      if (r.normalizedName && r.normalizedName === normInputName) {
+        if (r.accountStatus === "baja") {
+          return {
+            blocked: true,
+            accountStatus: "baja",
+            accountStatusLabel: CRONOS_WORKER_STATUS_BAJA,
+            workerId: r.workerId,
+            formattedWorkerId: r.formattedId,
+            workerName: r.workerName,
+            message:
+              "El perfil de " + r.workerName + " (" + r.formattedId + ") fue dado de baja por el administrador. " +
+              "No es posible crear un nuevo perfil con este nombre."
+          };
+        }
+
+        // Si es el mismo celular titular, recuperar su registro existente
+        if (r.primaryDeviceId === deviceId) {
+          if (r.accountStatus === "pendiente" && eventTag !== "ALTA" && eventTag !== "SOLICITUD") {
+            return {
+              pending: true,
+              accountStatus: "pendiente",
+              accountStatusLabel: CRONOS_WORKER_STATUS_PENDIENTE,
+              workerId: r.workerId,
+              formattedWorkerId: r.formattedId,
+              workerName: r.workerName,
+              message: "Tu solicitud (" + r.formattedId + ") sigue pendiente de aprobación por el administrador."
+            };
+          }
+          return evaluarYActualizarDispositivoTrabajador_(
+            workersSheet,
+            dir,
+            r,
+            deviceId,
+            deviceLabel,
+            localTime,
+            eventTag
+          );
+        }
+
+        // Si intenta registrar el mismo nombre desde otro celular en el flujo de solicitud ("register_worker")
+        if (eventTag === "SOLICITUD" || eventTag === "ALTA") {
+          return {
+            nameTaken: true,
+            message:
+              'Ya existe un trabajador registrado como "' + r.workerName + '". ' +
+              'Si eres tú, toca la pestaña "Ya tengo mi ID" e ingresa tu ID de 8 dígitos.'
+          };
+        }
+      }
+    }
+
+    // 3. Anti-spam de solicitudes: si este celular ya tiene una solicitud 🟡 Pendiente activa, devolver esa misma
+    if (eventTag === "SOLICITUD" || eventTag === "ALTA") {
+      for (let i = 0; i < dir.rows.length; i++) {
+        const r = dir.rows[i];
+        if (r.primaryDeviceId === deviceId && r.accountStatus === "pendiente") {
+          return {
+            workerId: r.workerId,
+            formattedWorkerId: r.formattedId,
+            workerName: r.workerName,
+            accountStatus: "pendiente",
+            accountStatusLabel: CRONOS_WORKER_STATUS_PENDIENTE,
+            deviceAudit: "🟡 Solicitud en revisión (" + deviceId + ")",
+            deviceLevel: "secondary",
+            deviceNote: ""
+          };
+        }
+      }
     }
   }
 
@@ -1322,7 +2173,15 @@ function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventT
 
   const formattedId = formatearIdTrabajador_(rawId);
   const ownerOfDevice = dir.primaryDeviceOwner[deviceId];
-  const belongsToOtherWorker = ownerOfDevice && ownerOfDevice.workerName.toLowerCase() !== inputName.toLowerCase();
+  const belongsToOtherWorker = ownerOfDevice && normalizarNombreComparacion_(ownerOfDevice.workerName) !== normInputName;
+
+  // Determinar estatus inicial:
+  // - Solicitudes de registro ("SOLICITUD") nacen en 🟡 Pendiente hasta que el Admin las apruebe
+  // - Admin o registros directos autorizados nacen en 🟢 Activo
+  const initialStatusInfo =
+    (eventTag === "SOLICITUD" && !isAdminOperation)
+      ? { code: "pendiente", label: CRONOS_WORKER_STATUS_PENDIENTE }
+      : { code: "activo", label: CRONOS_WORKER_STATUS_ACTIVO };
 
   let statusText = "✅ 1 celular (Habitual)";
   let rowLevel = "primary";
@@ -1342,7 +2201,7 @@ function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventT
   }
 
   const nextRow = workersSheet.getLastRow() + 1;
-  const rowRange = workersSheet.getRange(nextRow, 1, 1, 7);
+  const rowRange = workersSheet.getRange(nextRow, 1, 1, 8);
   rowRange.setNumberFormat("@");
   rowRange.setValues([[
     formattedId,
@@ -1351,19 +2210,338 @@ function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventT
     etiquetaEquipo,
     firstHistoryLine,
     localTime,
-    localTime + " (" + eventTag + ")"
+    localTime + " (" + eventTag + ")",
+    initialStatusInfo.label
   ]]);
 
-  estilizarFilaTrabajador_(workersSheet, nextRow, rowLevel);
+  aplicarValidacionEstatusTrabajadores_(workersSheet, nextRow, 1);
+  estilizarFilaTrabajador_(workersSheet, nextRow, rowLevel, initialStatusInfo.code);
 
   return {
     workerId: rawId,
     formattedWorkerId: formattedId,
     workerName: inputName,
+    accountStatus: initialStatusInfo.code,
+    accountStatusLabel: initialStatusInfo.label,
     deviceAudit: deviceAudit,
     deviceLevel: rowLevel,
     deviceNote: deviceNote
   };
+}
+
+/* ============================================================================
+   Pestaña Automática de KPIs: "📊 Resumen Mensual"
+   ============================================================================ */
+
+function obtenerHojaResumenCronos_(spreadsheet) {
+  let sheet = spreadsheet.getSheetByName(CRONOS_SUMMARY_SHEET_NAME);
+  if (!sheet) {
+    // Colocar justo antes de "Trabajadores" (o en posición 1 después del mes activo)
+    const allSheets = spreadsheet.getSheets();
+    let insertIdx = allSheets.length;
+    for (let i = 0; i < allSheets.length; i++) {
+      if (esHojaTrabajadoresCronos_(allSheets[i])) {
+        insertIdx = i;
+        break;
+      }
+    }
+    sheet = spreadsheet.insertSheet(CRONOS_SUMMARY_SHEET_NAME, insertIdx);
+  }
+  return sheet;
+}
+
+function formatearMinutosAHorasTexto_(totalMinutes) {
+  const mins = Math.max(0, Math.round(Number(totalMinutes) || 0));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h + "h " + String(m).padStart(2, "0") + "m";
+}
+
+function parsearFechaLocalMs_(localTimeStr) {
+  const clean = String(localTimeStr || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(clean)) return NaN;
+  const iso = clean.replace(/\s+/, "T") + "Z";
+  return Date.parse(iso);
+}
+
+/**
+ * Calcula y actualiza en tiempo real los KPIs del mes en la pestaña "📊 Resumen Mensual".
+ */
+function actualizarHojaResumenMensual_(spreadsheet, monthSheet, localTime) {
+  if (!spreadsheet || !monthSheet) return;
+
+  const summarySheet = obtenerHojaResumenCronos_(spreadsheet);
+  const workersSheet = obtenerHojaTrabajadoresCronos_(spreadsheet);
+  const dir = leerDirectorioTrabajadores_(workersSheet);
+  const monthName = monthSheet.getName();
+
+  const statsById = {};
+  const workerOrder = [];
+
+  for (let i = 0; i < dir.rows.length; i++) {
+    const w = dir.rows[i];
+    statsById[w.formattedId] = {
+      formattedId: w.formattedId,
+      workerName: w.workerName,
+      accountStatus: w.accountStatus,
+      accountStatusLabel: w.accountStatusLabel,
+      daysSet: {},
+      entradas: 0,
+      salidas: 0,
+      closedShifts: 0,
+      totalMinutes: 0,
+      openInMs: null,
+      openInTimeStr: "",
+      alertsCount: 0,
+      lastType: "",
+      lastTime: ""
+    };
+    workerOrder.push(w.formattedId);
+  }
+
+  let totalEntradasMes = 0;
+  let totalSalidasMes = 0;
+  let totalAlertasMes = 0;
+
+  const lastRow = monthSheet.getLastRow();
+  if (lastRow >= 2) {
+    const numRows = lastRow - 1;
+    const values = monthSheet.getRange(2, 1, numRows, 5).getValues();
+    const displayValues = monthSheet.getRange(2, 1, numRows, 5).getDisplayValues();
+
+    for (let i = 0; i < numRows; i++) {
+      const rTime = String(displayValues[i][0] || values[i][0] || "").trim();
+      const rId = String(values[i][1] || "").trim();
+      const rName = String(values[i][2] || "").trim();
+      const rType = String(values[i][3] || "").trim().toUpperCase();
+      const rAudit = String(values[i][4] || "").trim();
+
+      if (rType === "PRUEBA" || !rId) continue;
+
+      if (!statsById[rId]) {
+        statsById[rId] = {
+          formattedId: rId,
+          workerName: rName || "Trabajador",
+          accountStatus: "activo",
+          accountStatusLabel: CRONOS_WORKER_STATUS_ACTIVO,
+          daysSet: {},
+          entradas: 0,
+          salidas: 0,
+          closedShifts: 0,
+          totalMinutes: 0,
+          openInMs: null,
+          openInTimeStr: "",
+          alertsCount: 0,
+          lastType: "",
+          lastTime: ""
+        };
+        workerOrder.push(rId);
+      }
+
+      const st = statsById[rId];
+      if (rTime.length >= 10) {
+        st.daysSet[rTime.slice(0, 10)] = true;
+      }
+
+      if (rAudit.indexOf("🚨") !== -1 || rAudit.indexOf("⚠️") !== -1) {
+        st.alertsCount++;
+        totalAlertasMes++;
+      }
+
+      const tMs = parsearFechaLocalMs_(rTime);
+
+      if (rType === "ENTRADA") {
+        st.entradas++;
+        totalEntradasMes++;
+        st.openInMs = Number.isFinite(tMs) ? tMs : null;
+        st.openInTimeStr = rTime;
+        st.lastType = "ENTRADA";
+        st.lastTime = rTime;
+      } else if (rType === "SALIDA") {
+        st.salidas++;
+        totalSalidasMes++;
+        if (st.openInMs !== null && Number.isFinite(tMs) && tMs >= st.openInMs) {
+          const diffMin = Math.round((tMs - st.openInMs) / 60000);
+          if (diffMin <= 24 * 60) {
+            st.totalMinutes += diffMin;
+            st.closedShifts++;
+          }
+          st.openInMs = null;
+          st.openInTimeStr = "";
+        }
+        st.lastType = "SALIDA";
+        st.lastTime = rTime;
+      }
+    }
+  }
+
+  let activosCount = 0;
+  let pendientesBajasCount = 0;
+  let totalTurnosCerrados = 0;
+  let totalMinutosEquipo = 0;
+  let enTurnoAhoraCount = 0;
+
+  const workerTableRows = [];
+  for (let i = 0; i < workerOrder.length; i++) {
+    const fid = workerOrder[i];
+    const st = statsById[fid];
+    if (st.accountStatus === "activo") {
+      activosCount++;
+    } else {
+      pendientesBajasCount++;
+    }
+
+    totalTurnosCerrados += st.closedShifts;
+    totalMinutosEquipo += st.totalMinutes;
+
+    const daysCount = Object.keys(st.daysSet).length;
+    const avgMinutes = st.closedShifts > 0 ? Math.round(st.totalMinutes / st.closedShifts) : 0;
+    const alertLabel = st.alertsCount > 0 ? ("⚠️ " + st.alertsCount + " alerta(s)") : "✅ 0 alertas";
+
+    let currentStatusText = "⚪ Sin registros en el mes";
+    if (st.lastType === "ENTRADA") {
+      enTurnoAhoraCount++;
+      currentStatusText = "🟢 En turno (Entrada " + st.lastTime.slice(5, 16) + ")";
+    } else if (st.lastType === "SALIDA") {
+      currentStatusText = "🔵 Fuera de turno (Salida " + st.lastTime.slice(5, 16) + ")";
+    }
+
+    workerTableRows.push([
+      st.formattedId,
+      st.workerName,
+      st.accountStatusLabel,
+      daysCount,
+      st.entradas,
+      st.salidas,
+      st.closedShifts,
+      formatearMinutosAHorasTexto_(st.totalMinutes),
+      formatearMinutosAHorasTexto_(avgMinutes),
+      alertLabel,
+      currentStatusText
+    ]);
+  }
+
+  summarySheet.clear();
+  try {
+    summarySheet.setTabColor("#7C3AED");
+  } catch (_) {}
+
+  // Fila 1: Banner de título ejecutivo
+  const bannerRow = new Array(11).fill("");
+  bannerRow[0] = "📊 RESUMEN EJECUTIVO Y KPIs DE ASISTENCIA · " + monthName.toUpperCase();
+  bannerRow[9] = "Actualizado:";
+  bannerRow[10] = localTime;
+
+  // Fila 2: Encabezados de KPIs globales del mes
+  const kpiHeaders = [
+    "Trabajadores Activos",
+    "Pendientes / Bajas",
+    "Total Entradas (Mes)",
+    "Total Salidas (Mes)",
+    "Turnos Cerrados",
+    "Horas Totales Equipo",
+    "En Turno Ahora",
+    "Alertas Celular / GPS",
+    "Mes Auditado",
+    "Última Marca",
+    "Estado del Sello HMAC"
+  ];
+
+  // Fila 3: Valores de KPIs globales del mes
+  const kpiValues = [
+    activosCount,
+    pendientesBajasCount,
+    totalEntradasMes,
+    totalSalidasMes,
+    totalTurnosCerrados,
+    formatearMinutosAHorasTexto_(totalMinutosEquipo),
+    enTurnoAhoraCount,
+    totalAlertasMes,
+    monthName,
+    localTime,
+    "🔒 Protegido"
+  ];
+
+  const topMatrix = [
+    bannerRow,
+    kpiHeaders,
+    kpiValues,
+    CRONOS_SUMMARY_TABLE_HEADERS
+  ];
+
+  summarySheet.getRange(1, 1, 4, 11).setNumberFormat("@");
+  summarySheet.getRange(1, 1, 4, 11).setValues(topMatrix);
+
+  // Estilo de Banner (Fila 1) y Tarjetas KPI (Filas 2 y 3)
+  summarySheet.getRange(1, 1, 1, 11)
+    .setBackground("#1E1B4B")
+    .setFontColor("#FFFFFF")
+    .setFontFamily("Arial")
+    .setFontSize(11)
+    .setFontWeight("bold")
+    .setVerticalAlignment("middle");
+  summarySheet.setRowHeight(1, 38);
+
+  summarySheet.getRange(2, 1, 1, 11)
+    .setBackground("#F1F5F9")
+    .setFontColor("#475569")
+    .setFontFamily("Arial")
+    .setFontSize(9)
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  summarySheet.setRowHeight(2, 28);
+
+  summarySheet.getRange(3, 1, 1, 11)
+    .setBackground("#EEF2FF")
+    .setFontColor("#1E1B4B")
+    .setFontFamily("Arial")
+    .setFontSize(11)
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
+  summarySheet.setRowHeight(3, 36);
+
+  // Fila 4: Encabezado de tabla por trabajador
+  summarySheet.getRange(4, 1, 1, 11)
+    .setBackground("#0F172A")
+    .setFontColor("#FFFFFF")
+    .setFontFamily("Arial")
+    .setFontSize(10)
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle")
+    .setWrap(true);
+  summarySheet.setRowHeight(4, 40);
+  summarySheet.setFrozenRows(4);
+
+  for (let c = 0; c < CRONOS_SUMMARY_COL_WIDTHS.length; c++) {
+    summarySheet.setColumnWidth(c + 1, CRONOS_SUMMARY_COL_WIDTHS[c]);
+  }
+
+  if (workerTableRows.length > 0) {
+    const dataRange = summarySheet.getRange(5, 1, workerTableRows.length, 11);
+    dataRange.setNumberFormat("@");
+    dataRange.setValues(workerTableRows);
+
+    for (let i = 0; i < workerTableRows.length; i++) {
+      const rIdx = i + 5;
+      summarySheet.setRowHeight(rIdx, 34);
+      const bg = i % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
+      summarySheet.getRange(rIdx, 1, 1, 11)
+        .setBackground(bg)
+        .setFontFamily("Arial")
+        .setFontSize(10)
+        .setFontColor("#0F172A")
+        .setHorizontalAlignment("center")
+        .setVerticalAlignment("middle")
+        .setBorder(false, false, true, false, false, false, "#E2E8F0", SpreadsheetApp.BorderStyle.SOLID);
+
+      summarySheet.getRange(rIdx, 1).setFontFamily("Roboto Mono").setFontWeight("bold").setFontColor("#1E3A8A");
+      summarySheet.getRange(rIdx, 2).setHorizontalAlignment("left").setFontWeight("bold");
+      summarySheet.getRange(rIdx, 8).setBackground("#ECFDF5").setFontColor("#065F46").setFontWeight("bold");
+    }
+  }
 }
 
 /* ============================================================================
@@ -1394,7 +2572,7 @@ function parsearYmDesdeNombreHoja_(sheetName) {
 }
 
 function esHojaCronos_(sheet) {
-  if (!sheet || esHojaTrabajadoresCronos_(sheet) || sheet.getLastRow() < 1) return false;
+  if (!sheet || esHojaTrabajadoresCronos_(sheet) || esHojaResumenCronos_(sheet) || sheet.getLastRow() < 1) return false;
   const lastCol = sheet.getLastColumn();
   if (lastCol >= 11 && String(sheet.getRange(1, 11).getValue() || "") === CRONOS_HEADERS[10]) {
     return true;
@@ -1559,6 +2737,7 @@ function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
       if (
         candidate.getLastRow() === 0 &&
         !esHojaTrabajadoresCronos_(candidate) &&
+        !esHojaResumenCronos_(candidate) &&
         !esHojaCronos_(candidate)
       ) {
         reusableEmptySheet = candidate;

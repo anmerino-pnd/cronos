@@ -8,7 +8,7 @@
 [![Google Sheets](https://img.shields.io/badge/Google_Sheets-34A853?style=for-the-badge&logo=googlesheets&logoColor=white)](https://sheets.new)
 [![HMAC-SHA256](https://img.shields.io/badge/Seguridad-HMAC--SHA256-059669?style=for-the-badge&logo=shield&logoColor=white)](./backend/Code.gs)
 [![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub_Pages-181717?style=for-the-badge&logo=github&logoColor=white)](https://anmerino-pnd.github.io/cronos/)
-[![License](https://img.shields.io/badge/Licencia-MIT-F59E0B?style=for-the-badge)](./LICENSE)
+[![License](https://img.shields.io/badge/Licencia-Apache_2.0-D22128?style=for-the-badge&logo=apache&logoColor=white)](./LICENSE)
 
 Aplicación Web Progresiva (**PWA**) de uso libre y código abierto diseñada para el registro de asistencia (**Entrada / Salida**) con geolocalización GPS verificada, auditoría de dispositivos y hora oficial de servidor para equipos de trabajo en campo (ej. PyMEs de limpieza, mantenimiento, seguridad o rutas).
 
@@ -64,28 +64,34 @@ También puedes seguir esta misma guía interactiva directamente desde el **Pane
 El código completo del conector se encuentra en [`backend/Code.gs`](./backend/Code.gs) y también cuenta con botón **Copiar código** dentro del Panel de Administrador (`/admin`). Desde el **primer registro**, configura automáticamente tu libro de Google Sheets:
 
 * **Privacidad de la hoja:** Tu archivo de Google Sheets permanece **100% privado** en tu Google Drive; `"Cualquier usuario"` únicamente habilita el envío al webhook `doPost`, sin dar permiso de lectura ni escritura directa sobre el archivo.
-* **Organización automática por mes:** Cada registro se guarda en la pestaña del mes correspondiente según la hora oficial y zona horaria del Sheets (ej. `Octubre 2026`, `Noviembre 2026`...). Al iniciar un nuevo mes, en la primera marca recibida a partir del día 1 a las `00:00:00`, el script crea automáticamente la pestaña del nuevo mes y la coloca **al inicio (primera a la izquierda)** con pestaña en verde esmeralda (atenuando los meses anteriores a gris pizarra).
-* **Directorio automático `Trabajadores` (ID de 8 dígitos + Nombre Congelado + Serie de Celular con índice fijo):**
-  * Al registrarse por primera vez, a cada trabajador se le asigna un **ID único numérico de 8 dígitos** (ej. `4829-1034`) y su nombre completo queda **congelado** en la pestaña `Trabajadores` para evitar variaciones o errores de escritura.
-  * El sistema registra el identificador único del celular titular de cada empleado (`CEL-XXXXXXXX`) y mantiene una columna tipo lista numerada (`1)`, `2)`, `3)`...) con todos los dispositivos únicos que han usado su ID.
-  * Si un trabajador inicia sesión con su ID de 8 dígitos en el celular de un compañero (ej. porque se le descargó su teléfono o pidió que checaran por él), el registro **no se bloquea**, pero la columna **`Dispositivo / Auditoría`** señala claramente en rojo/ámbar de quién es el celular utilizado (`🚨 Celular de Juan Pérez`) o el número fijo del equipo adicional (`⚠️ Celular adicional #2`, `⚠️ Celular adicional #3`, conservando siempre el número asignado a cada dispositivo en la lista).
+* **Organización automática por mes y Pestaña de KPIs en vivo (`📊 Resumen Mensual`):** Cada registro se guarda en la pestaña del mes correspondiente según la hora oficial y zona horaria del Sheets (ej. `Octubre 2026`, `Noviembre 2026`...). Al iniciar un nuevo mes, en la primera marca recibida a partir del día 1 a las `00:00:00`, el script crea automáticamente la pestaña del nuevo mes y la coloca **al inicio (primera a la izquierda)** con pestaña en verde esmeralda. Además, crea y actualiza automáticamente la pestaña **`📊 Resumen Mensual`** con indicadores ejecutivos globales y tabla por trabajador (*Días asistidos, Entradas, Salidas, Turnos cerrados, Horas trabajadas `Xh YYm`, Promedio por turno, Alertas y Estado actual `🟢 En turno` / `🔵 Fuera de turno`*).
+* **Directorio automático `Trabajadores` (8 columnas: ID de 8 dígitos + Nombre Congelado + Serie de Celular + `Estatus de Acceso`):**
+  * Al registrarse por primera vez en *"Soy nuevo"*, a cada trabajador se le asigna un **ID único numérico de 8 dígitos** (ej. `4829-1034`), su nombre completo queda **congelado** y su cuenta inicia en **`🟡 Pendiente`** hasta que el Administrador lo aprueba (`🟢 Activo`), evitando registros si el QR o enlace cae en manos equivocadas.
+  * El Administrador puede cambiar el estatus de cualquier trabajador de **2 formas sincronizadas**: usando el **menú desplegable nativo (`🟢 Activo`, `🟡 Pendiente`, `🔴 Baja`)** en la columna 8 de la pestaña `Trabajadores`, o con **1 clic** desde la sección **`👥 Solicitudes y Acceso de Trabajadores`** en `/admin`.
+  * **Bloqueo integral de ex-trabajadores (`🔴 Baja`):** si un ex-trabajador intenta iniciar sesión con su ID desde su PC o desde el celular de un compañero activo, checar con una sesión abierta, o crear un perfil nuevo desde su celular registrado o con su nombre, el sistema bloquea la acción sin contaminar el celular de sus compañeros.
+  * **Auditoría de dispositivos con índice fijo:** mantiene una lista numerada (`1)`, `2)`, `3)`...) de todos los dispositivos únicos usados por cada trabajador, señalando `⚠️ Celular adicional #2`, `🚨 Celular de Juan Pérez`, `🖥️ Kiosco`, `📶 Cola Offline` o `⚠️ GPS estático/emulado`.
+* **Protección contra Fuerza Bruta en PIN de Admin:** Limita los intentos fallidos del PIN de 4 dígitos a **5**, aplicando bloqueo temporal automático (`15 min → 30 min → 60 min`) en el servidor.
 * **Diseño visual automático:** Encabezado oscuro congelado (`42 px`), filtros activos, anchos de columna holgados, filas de `34 px` con bandas alternadas, etiquetas de color automáticas (`ENTRADA` en verde, `SALIDA` en azul, `PRUEBA` en ámbar), precisión formateada en metros (`15 m`) y enlace limpio **`📍 Abrir en Maps`**.
-* **Sello Criptográfico Encadenado por Mes (`HMAC-SHA256`):** Cada fila se firma en el servidor con una llave secreta privada guardada en `PropertiesService` (invisible desde la hoja), incluyendo año-mes, folio consecutivo, ID del trabajador, auditoría de dispositivo y el sello de la fila anterior (`🔒 CRN-202611-0001-...`).
+* **Sello Criptográfico Encadenado por Mes (`HMAC-SHA256`) y Comprobante Bilateral:** Cada fila se firma en el servidor con una llave secreta privada guardada en `PropertiesService`, incluyendo año-mes, folio consecutivo, ID del trabajador, auditoría de dispositivo y el sello de la fila anterior (`🔒 CRN-202611-0001-...`), entregando además al trabajador su folio y sello firmado para copiarlo en 1 clic (`📋 Recibo`).
   * **Detección inmediata (`onEdit`):** Si alguien con acceso al archivo edita manualmente cualquier celda o mueve filas entre meses, el sello se marca en **rojo** al instante con una alerta.
-  * **Menú `🛡️ Cronos` en Google Sheets:** Permite ejecutar **🔍 Auditar pestaña actual (HMAC)**, **🗂️ Auditar todos los meses** y **🎨 Reaplicar diseño visual a esta pestaña**.
+  * **Menú `🛡️ Cronos` en Google Sheets:** Permite ejecutar **🔍 Auditar pestaña actual (HMAC)**, **🗂️ Auditar todos los meses**, **📊 Actualizar pestaña Resumen Mensual (KPIs)** y **🎨 Reaplicar diseño visual a esta pestaña**.
 
 ---
 
 ## Flujo del Trabajador
 
 1. **Vinculación única:** El trabajador abre el **Magic Link** enviado por WhatsApp o escanea el **Código QR** de la empresa (funciona tanto desde la cámara nativa del celular como desde el lector integrado en Cronos).
-2. **Registro local o inicio de sesión por ID:**
-   * **Soy nuevo:** Ingresa su nombre completo, recibe su **ID numérico de 8 dígitos** (ej. `4829-1034`) y acepta el aviso de privacidad. Su nombre queda fijo para evitar variaciones.
+2. **Solicitud de alta o inicio de sesión por ID:**
+   * **Soy nuevo:** Ingresa su nombre completo, recibe su **ID numérico de 8 dígitos** (ej. `4829-1034`) y envía su solicitud de aprobación (`🟡 Pendiente`). En cuanto el Administrador lo aprueba (`🟢 Activo`), quedan habilitados sus botones de asistencia.
    * **Ya tengo mi ID:** Si cambia de teléfono o necesita checar desde el celular de un compañero, solo ingresa sus **8 dígitos** y el sistema recupera automáticamente su nombre oficial desde la hoja.
-3. **Uso diario:** Dos botones táctiles de alto contraste (**REGISTRAR ENTRADA** y **REGISTRAR SALIDA**) con protección contra doble toque accidental (< 5 min), GPS obligatorio y recibo visual con la **hora oficial del servidor de Google**.
-4. **Menú de Opciones (3 acciones claras):**
+3. **Uso diario inteligente, Cola Offline y Mini-Historial:**
+   * **Estado inteligente de botón:** Resalta automáticamente **REGISTRAR SALIDA** cuando la última marca fue una `ENTRADA` (y viceversa).
+   * **Cola Offline (`📶 Sin señal`):** Si no hay datos móviles (ej. sótanos o bodegas), captura el GPS satelital obligatorio, guarda el registro en la cola local y lo sincroniza automáticamente al recuperar conexión.
+   * **Mini-Historial Local y Recibo Firmado:** Muestra las últimas 5 marcas registradas en ese celular con su hora oficial, folio (`#0001`), sello `HMAC-SHA256` y botón **`📋 Recibo`** para copiar el comprobante firmado.
+4. **Menú de Opciones (4 acciones claras):**
    * **Cambiar QR / Hoja (`Mantiene tu sesión`):** Escanea un nuevo QR o enlace (ej. al pasar de la hoja *2026* a *2027*) conservando su sesión, nombre congelado e ID de 8 dígitos en un solo paso.
    * **Cambiar sesión (`Misma empresa`):** Permite que otro compañero ingrese con su ID de 8 dígitos dentro de la misma empresa sin perder la vinculación de la hoja.
+   * **🖥️ Modo Kiosco (`Caseta / Tablet`):** Abre un teclado numérico en pantalla para que múltiples trabajadores registren Entrada o Salida rápidamente con su ID de 8 dígitos en una terminal fija.
    * **Cerrar sesión (`Borra datos`, en rojo):** Desvincula y borra del celular la empresa (QR/Sheets), el usuario y la sesión activa.
 
 ---

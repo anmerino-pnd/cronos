@@ -40,42 +40,47 @@ El sistema opera sin una base de datos centralizada intermedia. La vinculación 
 1. **Columna 1 — Perfil de Administrador y Conector (`#admin-form-card`):**
    * **Nombre completo del Administrador:** se congela en la pestaña `Trabajadores` para que el Admin también pueda checar asistencia si lo requiere.
    * **ID único de Administrador (8 dígitos, rango `9000-0000` a `9999-9999`):** nunca colisiona con los IDs de trabajadores (`1000-0000` a `8999-9999`).
-   * **PIN de Seguridad (exactamente 4 dígitos numéricos `0–9`):** protege la creación de hojas adicionales y permite al Admin iniciar sesión desde cualquier celular o navegador usando *"Ya tengo mi ID"*.
+   * **PIN de Seguridad (exactamente 4 dígitos numéricos `0–9`) con protección antibrute-force:** protege la creación de hojas adicionales, la gestión de trabajadores y el acceso al perfil Admin. Limita los intentos fallidos a **5**, aplicando bloqueo temporal automático (`15 min → 30 min → 60 min`) en `PropertiesService`.
    * **Acceso directo al Checador del Admin:** botón **`⏱️ Ir a mi Checador en: [Hoja seleccionada]`** que sincroniza automáticamente el Checador personal del Admin con la hoja elegida en la Columna 2.
-2. **Columna 2 — Mis Hojas de Google Sheets y Creación en 1 Clic (`#admin-sheets-panel`):**
+2. **Columna 2 — Mis Hojas de Google Sheets, Creación en 1 Clic y Aprobación de Trabajadores (`#admin-sheets-panel`):**
    * **Catálogo de hojas vinculadas:** permite cambiar en 1 clic la hoja activa tanto para el **Cartel QR / Magic Link** como para el **Checador personal del Admin**, con botón directo **`📊 Abrir Sheet`**.
    * **Creador de nuevas hojas en 1 clic (`admin_create_sheet`):** crea un nuevo archivo en Google Drive con la misma zona horaria y sin dejar pestañas `"Hoja 1"` sobrantes.
-   * **Migración selectiva de `Trabajadores` (desmarcada por defecto):** al activarla, despliega un selector (`#new-sheet-source-select`) para que el Admin elija **en base a cuál hoja/empresa existente** desea copiar la lista de trabajadores (conservando sus IDs de 8 dígitos, nombres congelados e historial de celulares).
+   * **Migración selectiva de `Trabajadores` (desmarcada por defecto):** al activarla, despliega un selector (`#new-sheet-source-select`) para que el Admin elija **en base a cuál hoja/empresa existente** desea copiar la lista de trabajadores (conservando sus IDs de 8 dígitos, nombres congelados, estatus e historial de celulares).
+   * **Solicitudes y Acceso de Trabajadores en 1 clic (`#admin-workers-box`):** permite aprobar nuevos ingresos (`🟡 Pendiente` → `🟢 Activo`), dar de baja ex-trabajadores (`🔴 Baja`) o reactivarlos en 1 clic (sincronizado bidireccionalmente con la lista desplegable nativa de la columna 8 **`Estatus de Acceso`** en Google Sheets).
 3. **Columna 3 — Cartel QR y Enlace Activo (`#admin-output-card`):**
    * Cartel QR listo para imprimir (`@media print`) o descargar en PNG, Magic Link para compartir por WhatsApp y botón **Probar conexión**.
 
-### 3.2 Vista de Trabajador — Onboarding y Login por ID de 8 Dígitos
+### 3.2 Vista de Trabajador — Onboarding con Solicitud de Aprobación y Login por ID de 8 Dígitos
 1. **Pestaña *"Soy nuevo"*:**
    * El trabajador escribe su nombre completo una sola vez y recibe su **ID único numérico de 8 dígitos** (ej. `4829-1034`).
-   * Su nombre queda **congelado** en la pestaña `Trabajadores` para impedir variaciones o errores de escritura.
+   * Su perfil se registra inicialmente en estatus **`🟡 Pendiente`** en la pestaña `Trabajadores` y su pantalla muestra el aviso de espera de aprobación hasta que el Administrador lo autorice (`🟢 Activo`), protegiendo a la empresa si el QR o enlace cae en manos equivocadas.
 2. **Pestaña *"Ya tengo mi ID"*:**
-   * **Trabajador:** ingresa sus 8 dígitos y recupera automáticamente su nombre oficial desde Google Sheets (ideal si cambia de celular o necesita registrar asistencia desde el teléfono de un compañero).
+   * **Trabajador:** ingresa sus 8 dígitos y recupera automáticamente su nombre oficial desde Google Sheets (si su cuenta está en `🔴 Baja`, el acceso se rechaza antes de registrar dispositivos).
    * **Administrador:** si ingresa su ID de Admin (`9XXX-XXXX`), la app solicita su **PIN de 4 números** y desbloquea tanto su **Checador** como la barra superior **Modo Administrador** con selector rápido de hoja.
 
-### 3.3 Vista de Checador Diario y Menú de Opciones Simplificado
-1. **Checador de alto contraste:**
-   * Encabezado con empresa activa, nombre congelado, chip copiable con su ID de 8 dígitos y botón **Opciones**.
-   * Dos botones táctiles (**REGISTRAR ENTRADA** y **REGISTRAR SALIDA**) con prevención de doble registro accidental (< 5 min), GPS obligatorio y recibo digital con hora oficial del servidor y sello criptográfico.
-2. **Menú de Opciones (3 acciones claras):**
+### 3.3 Vista de Checador Diario, Cola Offline, Mini-Historial y Modo Kiosco
+1. **Checador inteligente de alto contraste:**
+   * **Estado inteligente de botón (`#smart-shift-banner`):** sugiere y resalta automáticamente **REGISTRAR SALIDA** cuando la última marca fue una `ENTRADA` (y viceversa), reduciendo errores de dedo.
+   * **Cola Offline con GPS satelital obligatorio (`cronos_offline_queue`):** si el trabajador está en un sótano o zona sin datos móviles, captura sus coordenadas GPS satelitales reales, guarda el registro localmente y lo sincroniza automáticamente en cuanto regresa la conexión (registrando en el Sheets tanto la hora de captura offline como la hora oficial de recepción).
+   * **Comprobante firmado bilateral (`HMAC-SHA256`) y Mini-Historial Local (`#worker-history-box`):** muestra las últimas 5 marcas del trabajador en su teléfono con folio oficial (`#0001`), sello criptográfico (`CRN-...`) y botón **`📋 Recibo`** para copiar su comprobante firmado.
+2. **Menú de Opciones (4 acciones claras):**
    * **Cambiar QR / Hoja (`Mantiene tu sesión`):** escanea otro QR o enlace (ej. cambio de hoja anual) en 1 solo paso manteniendo su sesión e ID.
    * **Cambiar sesión (`Misma empresa`):** permite que otro compañero ingrese con su ID de 8 dígitos en ese mismo teléfono.
+   * **🖥️ Modo Kiosco (`Terminal fija`):** abre un teclado numérico en pantalla para que el personal de una caseta o tablet compartida registre Entrada o Salida rápidamente con su ID de 8 dígitos.
    * **Cerrar sesión (`Borra datos`, en rojo con confirmación en 2 toques):** desvincula la empresa, el usuario y la sesión del dispositivo.
 
 ---
 
-## 4. Automatización en Google Sheets (`backend/Code.gs`)
+## 4. Automatización y Seguridad en Google Sheets (`backend/Code.gs`)
 
-1. **Cero pestañas `"Hoja 1"` sobrantes:** tanto en la hoja principal como en las hojas adicionales creadas desde el panel Admin, el script reutiliza o limpia cualquier pestaña vacía por defecto (`Hoja 1` / `Sheet1`) para que el libro solo contenga las pestañas mensuales y `Trabajadores`.
-2. **Pestañas mensuales automáticas:** crea una pestaña por mes (`Octubre 2026`, `Noviembre 2026`...) según la hora oficial del servidor y coloca siempre el mes en curso como primera pestaña a la izquierda con color esmeralda (`#10B981`).
-3. **Directorio `Trabajadores` y auditoría de celulares con índice fijo:**
-   * Asocia `ID de 8 dígitos -> Nombre congelado -> Celular titular -> Lista numerada de dispositivos (1, 2, 3...)`.
-   * Si un empleado usa un celular adicional, la columna **`Dispositivo / Auditoría`** muestra siempre el número fijo que ocupa ese equipo en su historial (`⚠️ Celular adicional #2`, `⚠️ Celular adicional #3`) o alerta en rojo si el celular pertenece a otro compañero (`🚨 Celular de Juan Pérez`).
-4. **Sello Criptográfico Encadenado (`HMAC-SHA256`):** firma cada fila con una llave privada en `PropertiesService`, detecta ediciones manuales con `onEdit` y ofrece auditoría completa desde el menú **`🛡️ Cronos`**.
+1. **Cero pestañas `"Hoja 1"` sobrantes:** tanto en la hoja principal como en las hojas adicionales creadas desde el panel Admin, el script reutiliza o limpia cualquier pestaña vacía por defecto (`Hoja 1` / `Sheet1`).
+2. **Pestañas mensuales automáticas + Pestaña de KPIs en vivo (`📊 Resumen Mensual`):**
+   * Crea una pestaña por mes (`Octubre 2026`, `Noviembre 2026`...) según la hora oficial del servidor y coloca siempre el mes en curso como primera pestaña a la izquierda.
+   * Mantiene actualizada en cada registro la pestaña **`📊 Resumen Mensual`** con KPIs globales y métricas por trabajador (*Días asistidos, Entradas, Salidas, Turnos cerrados, Horas trabajadas `Xh YYm`, Promedio por turno, Alertas de dispositivo y Estado actual `🟢 En turno` / `🔵 Fuera de turno`*).
+3. **Directorio `Trabajadores` (8 columnas) con `Estatus de Acceso` y bloqueo de ex-trabajadores en 5 ángulos:**
+   * Incluye validación de datos nativa (menú desplegable `🟢 Activo`, `🟡 Pendiente`, `🔴 Baja`).
+   * Bloquea a cualquier ex-trabajador (`🔴 Baja`) en los 5 ángulos: 1) Login por ID desde PC o celular ajeno (sin contaminar el celular del compañero activo), 2) Intento de checar con sesión abierta, 3) Creación de nuevo perfil desde su celular registrado (`CEL-XXXXXXXX`), 4) Creación de nuevo perfil desde PC nueva con su mismo nombre, y 5) Creación de perfil con nombre falso (queda bloqueado en `🟡 Pendiente`) o sincronización de cola offline posterior a su baja.
+4. **Sello Criptográfico Encadenado (`HMAC-SHA256`) y Telemetría GPS:** firma cada fila con una llave privada en `PropertiesService`, detecta ediciones manuales con `onEdit`, entrega recibo firmado al trabajador y audita coordenadas GPS estáticas/emuladas desde escritorio (`⚠️ GPS estático/emulado`).
 
 ---
 

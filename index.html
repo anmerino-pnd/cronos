@@ -323,9 +323,48 @@
         </div>
       </div>
 
+      <!-- Offline Queue Sync Banner -->
+      <div class="offline-queue-banner no-print" id="offline-queue-banner" role="status" aria-live="polite" hidden>
+        <div class="offline-queue-info">
+          <span class="offline-queue-badge" id="offline-queue-count-badge">1</span>
+          <div>
+            <strong class="offline-queue-title" id="offline-queue-title">Registro guardado sin conexión</strong>
+            <p class="offline-queue-sub" id="offline-queue-sub">Se enviará automáticamente en cuanto vuelva el internet.</p>
+          </div>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-sync-offline-now">
+          Sincronizar
+        </button>
+      </div>
+
+      <!-- Worker Account Status Gates (Pending Approval or Blocked Ex-Worker) -->
+      <div class="worker-status-gate is-pending" id="worker-pending-box" role="status" aria-live="polite" hidden>
+        <div class="worker-status-gate-pill">🟡 Solicitud pendiente de aprobación</div>
+        <h2 class="worker-status-gate-title">Tu solicitud fue enviada al Administrador</h2>
+        <p class="worker-status-gate-desc">
+          Tu nombre y tu ID de 8 dígitos ya están registrados en espera de autorización. En cuanto el administrador te apruebe (en su panel o en la columna <strong>Estatus de Acceso</strong> del Google Sheets), podrás registrar tu Entrada y Salida.
+        </p>
+        <button type="button" class="btn btn-emerald btn-block" id="btn-check-approval-status">
+          🔄 Verificar si ya fui aprobado
+        </button>
+      </div>
+
+      <div class="worker-status-gate is-blocked" id="worker-blocked-box" role="alert" hidden>
+        <div class="worker-status-gate-pill is-danger">🔴 Acceso dado de baja</div>
+        <h2 class="worker-status-gate-title">Cuenta desactivada por el Administrador</h2>
+        <p class="worker-status-gate-desc" id="worker-blocked-desc">
+          Esta cuenta o dispositivo fue dado de baja en el directorio de la empresa y no tiene permiso para registrar asistencia.
+        </p>
+      </div>
+
       <!-- Main Punch Buttons -->
-      <div class="punch-zone">
-        <button type="button" class="btn-punch btn-punch-in" id="btn-punch-in">
+      <div class="punch-zone" id="punch-zone">
+        <div class="smart-shift-banner" id="smart-shift-banner">
+          <span class="smart-shift-dot" id="smart-shift-dot" aria-hidden="true"></span>
+          <span id="smart-shift-text">Siguiente marca sugerida: <strong>ENTRADA</strong></span>
+        </div>
+
+        <button type="button" class="btn-punch btn-punch-in is-suggested" id="btn-punch-in">
           <span class="punch-icon-box" aria-hidden="true">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
               <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
@@ -334,7 +373,10 @@
             </svg>
           </span>
           <span class="punch-copy">
-            <span class="punch-title">REGISTRAR ENTRADA</span>
+            <span class="punch-title-row">
+              <span class="punch-title">REGISTRAR ENTRADA</span>
+              <span class="punch-suggest-tag" id="badge-suggest-in">Sugerido</span>
+            </span>
             <span class="punch-sub">Capturar ubicación GPS e iniciar jornada</span>
           </span>
         </button>
@@ -348,7 +390,10 @@
             </svg>
           </span>
           <span class="punch-copy">
-            <span class="punch-title">REGISTRAR SALIDA</span>
+            <span class="punch-title-row">
+              <span class="punch-title">REGISTRAR SALIDA</span>
+              <span class="punch-suggest-tag" id="badge-suggest-out" hidden>Sugerido</span>
+            </span>
             <span class="punch-sub">Capturar ubicación GPS y finalizar jornada</span>
           </span>
         </button>
@@ -372,6 +417,15 @@
         <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-retry-punch">
           Reintentar registro
         </button>
+      </div>
+
+      <!-- Mini-Historial Local (Last 5 Punches with HMAC Proof) -->
+      <div class="worker-history-box no-print" id="worker-history-box" hidden>
+        <div class="worker-history-header">
+          <span class="worker-history-title">Mis últimas marcas en este celular</span>
+          <span class="worker-history-badge" id="worker-history-count">0</span>
+        </div>
+        <div class="worker-history-list" id="worker-history-list" role="list"></div>
       </div>
 
       <!-- Perforated Last Check-in Ticket Footer -->
@@ -698,6 +752,23 @@
                 </button>
               </form>
             </div>
+
+            <!-- 1-Click Worker Approvals & Ex-Worker Deactivation -->
+            <div class="admin-workers-box" id="admin-workers-box">
+              <div class="admin-workers-header">
+                <div>
+                  <h3 class="admin-create-sheet-title" style="margin-bottom: 0.15rem;">👥 Solicitudes y Acceso de Trabajadores</h3>
+                  <p class="admin-create-sheet-desc" style="margin-bottom: 0;">
+                    Aprueba nuevos ingresos (<code>🟡 Pendiente</code>) o da de baja a ex-trabajadores (<code>🔴 Baja</code>) en 1 clic. También puedes cambiarlo desde el desplegable de la columna <strong>Estatus de Acceso</strong> en Google Sheets.
+                  </p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-workers" title="Recargar directorio de trabajadores">
+                  🔄 Actualizar
+                </button>
+              </div>
+              <div class="admin-workers-stats" id="admin-workers-stats"></div>
+              <div class="admin-workers-list" id="admin-workers-list" role="list"></div>
+            </div>
           </div>
         </div>
 
@@ -819,6 +890,10 @@
           <span class="receipt-row-label">Precisión GPS</span>
           <span class="receipt-row-val" id="success-accuracy">—</span>
         </div>
+        <div class="receipt-row" id="success-folio-row" hidden>
+          <span class="receipt-row-label">Folio oficial</span>
+          <span class="receipt-row-val" id="success-folio">—</span>
+        </div>
         <div class="receipt-row" id="success-seal-row" hidden>
           <span class="receipt-row-label">Sello HMAC</span>
           <span class="receipt-row-val" id="success-seal">—</span>
@@ -826,6 +901,9 @@
       </div>
 
       <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm btn-block" id="btn-copy-receipt" style="margin-bottom: 0.45rem;" hidden>
+          📋 Copiar comprobante firmado
+        </button>
         <button type="button" class="btn btn-primary btn-block" id="btn-close-success">
           Listo
         </button>
@@ -855,7 +933,7 @@
   </div>
 
   <!-- =====================================================================
-       MODAL 3: OPCIONES DE SESIÓN Y HOJA (Cambiar QR/Hoja, Cambiar sesión, Cerrar sesión)
+       MODAL 3: OPCIONES DE SESIÓN Y HOJA (Cambiar QR/Hoja, Cambiar sesión, Kiosco, Cerrar sesión)
        ===================================================================== -->
   <div class="modal-backdrop" id="modal-account" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" hidden>
     <div class="modal-card">
@@ -884,6 +962,16 @@
             </span>
             <span class="option-card-desc" id="desc-change-worker">
               Permite que otro trabajador ingrese con su ID de 8 dígitos en esta misma hoja.
+            </span>
+          </button>
+
+          <button type="button" class="option-card-btn" id="btn-open-kiosk">
+            <span class="option-card-head">
+              <span class="option-card-title">🖥️ Modo Kiosco (Caseta / Tablet)</span>
+              <span class="option-pill is-neutral">Terminal fija</span>
+            </span>
+            <span class="option-card-desc">
+              Abre un teclado numérico en pantalla para que el personal registre Entrada o Salida rápidamente con su ID de 8 dígitos.
             </span>
           </button>
 
@@ -917,7 +1005,7 @@
         <h2 class="view-title" id="worker-id-modal-title" style="font-size: 1.25rem;">
           Tu ID único de acceso
         </h2>
-        <p class="view-lead" style="font-size: 0.89rem; margin-bottom: 0.85rem;">
+        <p class="view-lead" id="worker-id-modal-lead" style="font-size: 0.89rem; margin-bottom: 0.85rem;">
           Tu nombre (<strong id="modal-id-worker-name">—</strong>) quedó congelado a este ID de 8 dígitos. Si cambias de celular o necesitas checar desde otro teléfono, usa <strong>Cambiar sesión</strong> e ingresa este número:
         </p>
 
@@ -934,6 +1022,64 @@
         <button type="button" class="btn btn-emerald btn-block" id="btn-close-worker-id">
           Ya lo guardé, ir al checador
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       MODAL 5: MODO KIOSCO (TERMINAL POR ID DE 8 DÍGITOS PARA TABLET / CASETA)
+       ===================================================================== -->
+  <div class="modal-backdrop" id="modal-kiosk" role="dialog" aria-modal="true" aria-labelledby="kiosk-title" hidden>
+    <div class="modal-card kiosk-modal-card">
+      <div class="kiosk-header">
+        <div>
+          <span class="kiosk-kicker">🖥️ TERMINAL MODO KIOSCO</span>
+          <h2 class="kiosk-org-title" id="kiosk-title">—</h2>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-close-kiosk">
+          Salir de Kiosco
+        </button>
+      </div>
+
+      <div class="kiosk-body">
+        <div class="kiosk-display-box">
+          <label class="kiosk-display-label" for="input-kiosk-id">INGRESA TU ID DE 8 DÍGITOS</label>
+          <input
+            type="text"
+            id="input-kiosk-id"
+            class="kiosk-id-input"
+            inputmode="numeric"
+            placeholder="0000-0000"
+            maxlength="9"
+            autocomplete="off"
+          >
+        </div>
+
+        <div class="alert" id="kiosk-feedback-box" role="status" aria-live="polite" hidden></div>
+
+        <div class="kiosk-numpad" role="group" aria-label="Teclado numérico de Kiosco">
+          <button type="button" class="kiosk-key" data-kiosk-key="1">1</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="2">2</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="3">3</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="4">4</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="5">5</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="6">6</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="7">7</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="8">8</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="9">9</button>
+          <button type="button" class="kiosk-key is-action" data-kiosk-key="clear">Limpiar</button>
+          <button type="button" class="kiosk-key" data-kiosk-key="0">0</button>
+          <button type="button" class="kiosk-key is-action" data-kiosk-key="back">⌫</button>
+        </div>
+
+        <div class="kiosk-punch-actions">
+          <button type="button" class="btn btn-emerald btn-block kiosk-punch-btn" id="btn-kiosk-in">
+            🟢 REGISTRAR ENTRADA
+          </button>
+          <button type="button" class="btn btn-primary btn-block kiosk-punch-btn is-kiosk-out" id="btn-kiosk-out">
+            🔵 REGISTRAR SALIDA
+          </button>
+        </div>
       </div>
     </div>
   </div>

@@ -17,6 +17,8 @@ const STORAGE_DEVICE_ID_KEY = 'cronos_device_id';
 const STORAGE_KNOWN_WORKERS_KEY = 'cronos_known_workers';
 const STORAGE_PWA_DISMISSED_KEY = 'cronos_pwa_dismissed_at';
 const STORAGE_ADMIN_DRAFT_KEY = 'cronos_admin_draft';
+const STORAGE_OFFLINE_QUEUE_KEY = 'cronos_offline_queue';
+const STORAGE_PUNCH_HISTORY_KEY = 'cronos_punch_history';
 
 const DUPLICATE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const PWA_DISMISS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -36,6 +38,7 @@ const state = {
   pendingCompany: null, // { scriptId, orgName, sheetId, isSessionSwitch: boolean }
   lastAttemptedPunchType: null, // 'ENTRADA' | 'SALIDA'
   pendingRepeatType: null,
+  lastReceiptText: '',
   unlinkConfirmArmed: false,
   deferredInstallPrompt: null,
   clockTimerId: null,
@@ -43,11 +46,13 @@ const state = {
   qrScannerRunning: false,
   html5QrScriptPromise: null,
   adminModulesPromise: null,
-  activeAdminAccess: null, // { scriptId, orgName, sheetId, sheetUrl, token, magicLink }
+  activeAdminAccess: null, // { scriptId, orgName, sheetId, rawSheetId, sheetUrl, token, magicLink }
   adminSheetsCatalog: [], // [{ sheetId, orgName, sheetUrl, createdAt, isPrimary }]
+  adminWorkersList: [], // [{ workerId, formattedWorkerId, workerName, accountStatus, accountStatusLabel, isAdmin }]
   adminPin: '',
   adminId: '',
   adminName: '',
+  syncingOfflineQueue: false,
   deviceId: '' // Persistent phone identifier (CEL-XXXXXXXX)
 };
 
@@ -80,10 +85,17 @@ function cacheElements() {
     'checador-org-name', 'checador-worker-name',
     'checador-worker-id', 'btn-copy-worker-id', 'worker-id-copy-tag',
     'btn-card-options',
-    'live-clock-time', 'live-clock-date', 'btn-punch-in', 'btn-punch-out',
+    'live-clock-time', 'live-clock-date',
+    'offline-queue-banner', 'offline-queue-count-badge', 'offline-queue-title', 'offline-queue-sub', 'btn-sync-offline-now',
+    'worker-pending-box', 'btn-check-approval-status',
+    'worker-blocked-box', 'worker-blocked-desc',
+    'punch-zone', 'smart-shift-banner', 'smart-shift-dot', 'smart-shift-text',
+    'btn-punch-in', 'btn-punch-out', 'badge-suggest-in', 'badge-suggest-out',
     'punch-loading-box', 'punch-loading-title', 'punch-loading-sub',
     'punch-error-box', 'punch-error-title', 'punch-error-desc', 'punch-error-steps',
-    'btn-retry-punch', 'last-checkin-value',
+    'btn-retry-punch',
+    'worker-history-box', 'worker-history-count', 'worker-history-list',
+    'last-checkin-value',
     // PWA Banner
     'pwa-install-banner', 'pwa-android-box', 'pwa-ios-box',
     'btn-pwa-install', 'btn-pwa-dismiss',
@@ -99,6 +111,7 @@ function cacheElements() {
     'admin-create-sheet-status', 'form-admin-create-sheet', 'new-sheet-org-name',
     'new-sheet-copy-workers', 'new-sheet-source-box', 'new-sheet-source-select',
     'btn-create-new-sheet',
+    'admin-workers-box', 'btn-refresh-workers', 'admin-workers-stats', 'admin-workers-list',
     'admin-output-card', 'poster-org-title', 'admin-qr-canvas',
     'btn-open-active-sheet', 'admin-magic-link', 'btn-copy-magic-link', 'btn-share-whatsapp',
     'btn-download-qr', 'btn-print-qr', 'btn-test-connection', 'test-connection-result',
@@ -106,13 +119,16 @@ function cacheElements() {
     'modal-success', 'success-banner', 'success-stamp', 'success-time-big',
     'success-headline', 'success-worker', 'success-worker-id', 'success-org',
     'success-server-time', 'success-timezone', 'success-accuracy',
-    'success-seal-row', 'success-seal', 'btn-close-success',
+    'success-folio-row', 'success-folio',
+    'success-seal-row', 'success-seal', 'btn-copy-receipt', 'btn-close-success',
     'modal-confirm-repeat', 'repeat-message', 'btn-confirm-repeat-yes', 'btn-confirm-repeat-no',
     'modal-account', 'account-modal-sub', 'btn-switch-qr', 'desc-switch-qr',
-    'btn-change-worker', 'desc-change-worker',
+    'btn-change-worker', 'desc-change-worker', 'btn-open-kiosk',
     'btn-unlink-company', 'title-unlink-company', 'desc-unlink-company', 'btn-close-account',
     'modal-worker-id', 'modal-id-worker-name', 'modal-id-digits',
     'btn-modal-copy-id', 'btn-close-worker-id',
+    'modal-kiosk', 'kiosk-title', 'btn-close-kiosk', 'input-kiosk-id',
+    'kiosk-feedback-box', 'btn-kiosk-in', 'btn-kiosk-out',
     'app-toast'
   ];
 
@@ -300,7 +316,7 @@ function lookupLocalWorkerName(workerId) {
 }
 
 /* ==========================================================================
-   Storage Helpers
+   Storage Helpers (Config, Offline Queue & Mini-Historial)
    ========================================================================== */
 
 function loadConfig() {
@@ -319,10 +335,12 @@ function loadConfig() {
       parsed.privacyAccepted === true
     ) {
       parsed.sheetId = typeof parsed.sheetId === 'string' ? parsed.sheetId.trim() : '';
-      // Auto-assign an 8-digit workerId if migrating from an older localStorage config
       if (!normalizeWorkerId8(parsed.workerId)) {
         parsed.workerId = generateRandomWorkerId8();
         saveConfig(parsed);
+      }
+      if (!parsed.accountStatus) {
+        parsed.accountStatus = 'activo';
       }
       rememberWorkerLocally(parsed.workerId, parsed.workerName);
       return parsed;
@@ -365,6 +383,69 @@ function loadLastCheckin() {
 
 function saveLastCheckin(record) {
   localStorage.setItem(STORAGE_LAST_CHECKIN_KEY, JSON.stringify(record));
+}
+
+function loadOfflineQueue() {
+  try {
+    const raw = localStorage.getItem(STORAGE_OFFLINE_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineQueue(queue) {
+  try {
+    localStorage.setItem(STORAGE_OFFLINE_QUEUE_KEY, JSON.stringify(queue || []));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function loadPunchHistory() {
+  try {
+    const raw = localStorage.getItem(STORAGE_PUNCH_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePunchHistory(list) {
+  try {
+    localStorage.setItem(STORAGE_PUNCH_HISTORY_KEY, JSON.stringify((list || []).slice(0, 25)));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function addPunchHistoryEntry(entry) {
+  const list = loadPunchHistory();
+  list.unshift(entry);
+  savePunchHistory(list);
+}
+
+function updateQueuedHistoryEntry(queueId, updates) {
+  const list = loadPunchHistory();
+  let changed = false;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] && list[i].queueId === queueId) {
+      if (updates.remove) {
+        list.splice(i, 1);
+      } else {
+        Object.assign(list[i], updates);
+      }
+      changed = true;
+      break;
+    }
+  }
+  if (changed) {
+    savePunchHistory(list);
+  }
 }
 
 function clearAllWorkerData() {
@@ -421,6 +502,25 @@ function formatServerTimeParts(serverTimeStr) {
     shortDate,
     compact: `${time12h} · ${day} ${monthLabel}`
   };
+}
+
+function formatNowLocalString() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+}
+
+function buildSignedReceiptText({ type, workerName, workerId, orgName, localTime, folio, seal }) {
+  const fId = formatWorkerId8(workerId);
+  const parts = [`Comprobante Cronos · ${orgName}`, `${workerName} (ID ${fId})`, `${type}: ${localTime}`];
+  if (folio) parts.push(`Folio ${folio}`);
+  if (seal) parts.push(`Sello HMAC: ${seal}`);
+  return parts.join(' | ');
 }
 
 function cleanJoinQueryFromUrl() {
@@ -509,6 +609,9 @@ async function switchView(viewName) {
     state.quickSwitchMode = false;
     startLiveClock();
     renderChecadorView();
+    if (navigator.onLine) {
+      syncOfflineQueue({ silent: true });
+    }
   } else {
     stopLiveClock();
   }
@@ -623,6 +726,7 @@ function applyDecodedInvite({ scriptId, orgName, sheetId = '' }) {
       workerName: existing.workerName,
       isAdmin: Boolean(existing.isAdmin),
       adminPin: existing.adminPin || '',
+      accountStatus: existing.accountStatus || 'activo',
       privacyAccepted: true,
       configuredAt: new Date().toISOString()
     };
@@ -819,7 +923,7 @@ function setRegisterAuthTab(mode) {
 
   el['register-error'].hidden = true;
   el['btn-save-worker'].textContent = isNew
-    ? 'Crear mi ID y entrar'
+    ? 'Crear mi ID y solicitar acceso'
     : 'Iniciar sesión con mi ID';
 }
 
@@ -912,16 +1016,24 @@ async function handleSaveWorkerRegistration(event) {
     }
 
     const workerId = normalizeWorkerId8(state.pendingNewWorkerId) || generateRandomWorkerId8();
+    const targetCompany = { ...state.pendingCompany };
+
     completeWorkerSessionLogin({
-      scriptId: state.pendingCompany.scriptId,
-      orgName: state.pendingCompany.orgName,
-      sheetId: state.pendingCompany.sheetId || '',
+      scriptId: targetCompany.scriptId,
+      orgName: targetCompany.orgName,
+      sheetId: targetCompany.sheetId || '',
       workerId,
       workerName,
       isAdmin: false,
       adminPin: '',
-      toastMsg: `Perfil guardado correctamente · ID ${formatWorkerId8(workerId)}`
+      accountStatus: 'activo',
+      toastMsg: `Perfil guardado · ID ${formatWorkerId8(workerId)}`
     });
+
+    // Sync registration request with backend (handles 🟡 Pendiente or 🔴 Baja device/name blocks)
+    if (navigator.onLine) {
+      syncNewWorkerRegistrationWithBackend(targetCompany, workerId, workerName);
+    }
     return;
   }
 
@@ -974,6 +1086,7 @@ async function handleSaveWorkerRegistration(event) {
       workerName: boundName,
       isAdmin: false,
       adminPin: '',
+      accountStatus: 'activo',
       toastMsg: `Sesión iniciada: ${boundName} (ID ${formatWorkerId8(digits8)})`
     });
     return;
@@ -997,8 +1110,22 @@ async function handleSaveWorkerRegistration(event) {
         deviceId: device.deviceId,
         deviceLabel: device.deviceLabel
       },
-      { allowNotFound: true }
+      { allowNotFound: true, allowStatusGates: true }
     );
+
+    if (res && res.status === 'blocked') {
+      el['register-error'].textContent =
+        res.message || 'Esta cuenta de trabajador fue dada de baja por el administrador y no tiene permiso para acceder.';
+      el['register-error'].hidden = false;
+      return;
+    }
+
+    if (res && res.status === 'auth_locked') {
+      el['register-error'].textContent =
+        res.message || 'Demasiados intentos fallidos. Acceso de Administrador bloqueado temporalmente.';
+      el['register-error'].hidden = false;
+      return;
+    }
 
     if (res && res.status === 'admin_pin_required') {
       if (el['login-admin-pin-box']) {
@@ -1028,10 +1155,33 @@ async function handleSaveWorkerRegistration(event) {
       return;
     }
 
+    if (res && res.status === 'pending_approval' && res.workerName) {
+      completeWorkerSessionLogin({
+        scriptId: state.pendingCompany.scriptId,
+        orgName: state.pendingCompany.orgName,
+        sheetId: state.pendingCompany.sheetId || '',
+        workerId: normalizeWorkerId8(res.workerId) || digits8,
+        workerName: res.workerName,
+        isAdmin: false,
+        adminPin: '',
+        accountStatus: 'pendiente',
+        toastMsg: `Solicitud en revisión: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
+      });
+      return;
+    }
+
     if (res && res.status === 'ok' && res.workerName) {
       const isAdminUser = Boolean(res.isAdmin);
       if (isAdminUser && Array.isArray(res.sheets) && res.sheets.length > 0) {
         saveLocalAdminCatalog(state.pendingCompany.scriptId, res.sheets);
+      }
+      if (res.lastPunchType) {
+        saveLastCheckin({
+          type: res.lastPunchType,
+          serverTime: res.lastPunchTime || res.localTime || '',
+          timeZone: res.timeZone || '',
+          recordedAtMs: 0
+        });
       }
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
@@ -1041,6 +1191,7 @@ async function handleSaveWorkerRegistration(event) {
         workerName: res.workerName,
         isAdmin: isAdminUser,
         adminPin: isAdminUser ? enteredAdminPin : '',
+        accountStatus: res.accountStatus || 'activo',
         toastMsg: isAdminUser
           ? `Sesión de Administrador activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
           : `Sesión activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
@@ -1059,6 +1210,7 @@ async function handleSaveWorkerRegistration(event) {
         workerName: cachedName,
         isAdmin: false,
         adminPin: '',
+        accountStatus: 'activo',
         toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
       });
       return;
@@ -1081,6 +1233,7 @@ async function handleSaveWorkerRegistration(event) {
         workerName: cachedName,
         isAdmin: false,
         adminPin: '',
+        accountStatus: 'activo',
         toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
       });
       return;
@@ -1095,6 +1248,105 @@ async function handleSaveWorkerRegistration(event) {
   }
 }
 
+async function syncNewWorkerRegistrationWithBackend(targetCompany, workerId, workerName) {
+  try {
+    const device = getDeviceIdentity();
+    const res = await sendWebhookPost(
+      targetCompany.scriptId,
+      {
+        action: 'register_worker',
+        sheetId: targetCompany.sheetId || '',
+        workerId,
+        workerName,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel
+      },
+      { allowStatusGates: true }
+    );
+    const current = loadConfig();
+    if (!current || current.scriptId !== targetCompany.scriptId) return;
+
+    if (res && res.status === 'blocked') {
+      current.accountStatus = 'baja';
+      saveConfig(current);
+      if (state.currentView === 'checador') {
+        renderChecadorView();
+      }
+      return;
+    }
+
+    if (res && res.status === 'name_taken') {
+      showToast(res.message || 'Ese nombre ya está registrado. Usa "Ya tengo mi ID".', 4000);
+      return;
+    }
+
+    if (res && res.status === 'ok' && res.accountStatus) {
+      current.accountStatus = res.accountStatus;
+      if (res.workerId && normalizeWorkerId8(res.workerId)) {
+        current.workerId = normalizeWorkerId8(res.workerId);
+      }
+      if (res.workerName) {
+        current.workerName = res.workerName;
+      }
+      saveConfig(current);
+      if (state.currentView === 'checador') {
+        renderChecadorView();
+      }
+    }
+  } catch {
+    // Non-fatal if offline or mock server does not handle register_worker specifically
+  }
+}
+
+async function handleCheckApprovalStatus() {
+  const config = loadConfig();
+  if (!config) return;
+
+  const btn = el['btn-check-approval-status'];
+  if (!btn) return;
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Consultando con el servidor…';
+
+  try {
+    const device = getDeviceIdentity();
+    const res = await sendWebhookPost(
+      config.scriptId,
+      {
+        action: 'login_worker',
+        sheetId: config.sheetId || '',
+        workerId: config.workerId,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel
+      },
+      { allowNotFound: true, allowStatusGates: true }
+    );
+
+    if (res && res.status === 'ok' && res.accountStatus !== 'pendiente') {
+      config.accountStatus = 'activo';
+      if (res.workerName) config.workerName = res.workerName;
+      saveConfig(config);
+      renderChecadorView();
+      showToast('¡Tu cuenta ya fue aprobada! Ya puedes registrar Entrada y Salida.', 3500);
+    } else if (res && (res.status === 'blocked' || res.status === 'account_deactivated' || res.accountStatus === 'baja')) {
+      config.accountStatus = 'baja';
+      saveConfig(config);
+      renderChecadorView();
+      showToast('Tu cuenta fue marcada como Baja por el administrador.', 3500);
+    } else {
+      config.accountStatus = 'pendiente';
+      saveConfig(config);
+      renderChecadorView();
+      showToast('Tu solicitud sigue en espera de aprobación por el administrador.', 3200);
+    }
+  } catch (err) {
+    showToast((err && err.message) || 'No se pudo consultar el estatus. Revisa tu conexión.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
 function completeWorkerSessionLogin({
   scriptId,
   orgName,
@@ -1103,6 +1355,7 @@ function completeWorkerSessionLogin({
   workerName,
   isAdmin = false,
   adminPin = '',
+  accountStatus = 'activo',
   toastMsg
 }) {
   const prev = loadConfig();
@@ -1121,6 +1374,7 @@ function completeWorkerSessionLogin({
     workerName,
     isAdmin: Boolean(isAdmin),
     adminPin: isAdmin ? (adminPin || '') : '',
+    accountStatus: isAdmin ? 'activo' : (accountStatus || 'activo'),
     privacyAccepted: true,
     configuredAt: new Date().toISOString()
   };
@@ -1143,7 +1397,7 @@ function completeWorkerSessionLogin({
 }
 
 /* ==========================================================================
-   View 3: Daily Worker Checador, Live Clock & Mandatory GPS Punch
+   View 3: Daily Worker Checador, Smart Shift State, Offline Queue & History
    ========================================================================== */
 
 function updateLiveClock() {
@@ -1223,9 +1477,170 @@ function renderChecadorView() {
   el['checador-worker-id'].textContent = formatWorkerId8(config.workerId);
   el['punch-loading-box'].hidden = true;
   el['punch-error-box'].hidden = true;
-  setPunchButtonsDisabled(false);
 
+  // Render Account Status Gate (🟢 Activo vs 🟡 Pendiente vs 🔴 Baja)
+  const accStatus = config.isAdmin ? 'activo' : (config.accountStatus || 'activo');
+  const isPending = accStatus === 'pendiente';
+  const isBlocked = accStatus === 'baja';
+
+  if (el['worker-pending-box']) {
+    el['worker-pending-box'].hidden = !isPending;
+  }
+  if (el['worker-blocked-box']) {
+    el['worker-blocked-box'].hidden = !isBlocked;
+  }
+  if (el['punch-zone']) {
+    el['punch-zone'].hidden = isPending || isBlocked;
+  }
+
+  setPunchButtonsDisabled(isPending || isBlocked);
+  renderSmartShiftState();
+  renderOfflineQueueBanner();
+  renderWorkerHistory();
   renderLastCheckinFooter();
+}
+
+function renderSmartShiftState() {
+  const last = loadLastCheckin();
+  const isLastIn = last && last.type === 'ENTRADA';
+
+  if (el['smart-shift-banner'] && el['smart-shift-text']) {
+    el['smart-shift-banner'].classList.toggle('is-in-shift', Boolean(isLastIn));
+    if (isLastIn) {
+      const parts = formatServerTimeParts(last.serverTime);
+      el['smart-shift-text'].innerHTML =
+        `Turno en curso (Entrada ${parts.time12h}) · Siguiente sugerida: <strong>SALIDA</strong>`;
+    } else {
+      el['smart-shift-text'].innerHTML =
+        'Siguiente marca sugerida: <strong>ENTRADA</strong>';
+    }
+  }
+
+  if (el['btn-punch-in'] && el['btn-punch-out']) {
+    el['btn-punch-in'].classList.toggle('is-suggested', !isLastIn);
+    el['btn-punch-in'].classList.toggle('is-secondary-action', Boolean(isLastIn));
+    el['btn-punch-out'].classList.toggle('is-suggested', Boolean(isLastIn));
+    el['btn-punch-out'].classList.toggle('is-secondary-action', !isLastIn);
+  }
+  if (el['badge-suggest-in']) {
+    el['badge-suggest-in'].hidden = Boolean(isLastIn);
+  }
+  if (el['badge-suggest-out']) {
+    el['badge-suggest-out'].hidden = !isLastIn;
+  }
+}
+
+function renderOfflineQueueBanner() {
+  if (!el['offline-queue-banner']) return;
+  const queue = loadOfflineQueue();
+  if (queue.length === 0) {
+    el['offline-queue-banner'].hidden = true;
+    return;
+  }
+  el['offline-queue-banner'].hidden = false;
+  if (el['offline-queue-count-badge']) {
+    el['offline-queue-count-badge'].textContent = String(queue.length);
+  }
+  if (el['offline-queue-title']) {
+    el['offline-queue-title'].textContent =
+      queue.length === 1
+        ? '1 registro guardado sin internet'
+        : `${queue.length} registros guardados sin internet`;
+  }
+}
+
+function renderWorkerHistory() {
+  if (!el['worker-history-box'] || !el['worker-history-list']) return;
+  const config = loadConfig();
+  if (!config) {
+    el['worker-history-box'].hidden = true;
+    return;
+  }
+
+  const all = loadPunchHistory();
+  const myItems = all
+    .filter(
+      (item) =>
+        item &&
+        item.workerId === config.workerId &&
+        (item.sheetId || '') === (config.sheetId || '') &&
+        item.orgName === config.orgName
+    )
+    .slice(0, 5);
+
+  if (myItems.length === 0) {
+    el['worker-history-box'].hidden = true;
+    return;
+  }
+
+  el['worker-history-box'].hidden = false;
+  if (el['worker-history-count']) {
+    el['worker-history-count'].textContent = String(myItems.length);
+  }
+
+  const listEl = el['worker-history-list'];
+  listEl.innerHTML = '';
+
+  for (const item of myItems) {
+    const row = document.createElement('div');
+    row.className = 'worker-history-item';
+    row.setAttribute('role', 'listitem');
+
+    const left = document.createElement('div');
+    left.className = 'worker-history-left';
+
+    const top = document.createElement('div');
+    top.className = 'worker-history-top';
+
+    const badge = document.createElement('span');
+    const isQueued = item.status === 'queued';
+    badge.className = `worker-history-type ${isQueued ? 'is-queued' : (item.type === 'ENTRADA' ? 'is-in' : 'is-out')}`;
+    badge.textContent = isQueued ? `⏳ ${item.type} (Offline)` : item.type;
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'worker-history-time';
+    const parts = formatServerTimeParts(item.serverTime);
+    timeSpan.textContent = parts.compact;
+
+    top.appendChild(badge);
+    top.appendChild(timeSpan);
+    left.appendChild(top);
+
+    const meta = document.createElement('div');
+    meta.className = 'worker-history-meta';
+    if (isQueued) {
+      meta.textContent = 'Pendiente de sincronizar al conectar a internet';
+    } else {
+      const folioPart = item.folio ? `${item.folio} · ` : '';
+      const sealShort = item.seal ? `🔒 ${item.seal.slice(0, 15)}…` : 'Verificado';
+      meta.textContent = `${folioPart}${sealShort}`;
+    }
+    left.appendChild(meta);
+    row.appendChild(left);
+
+    if (!isQueued && item.seal) {
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'btn-copy-chip';
+      copyBtn.textContent = '📋 Recibo';
+      copyBtn.addEventListener('click', async () => {
+        const receiptTxt = buildSignedReceiptText({
+          type: item.type,
+          workerName: item.workerName,
+          workerId: item.workerId,
+          orgName: item.orgName,
+          localTime: item.serverTime,
+          folio: item.folio || '',
+          seal: item.seal || ''
+        });
+        await copyTextToClipboard(receiptTxt);
+        showToast('Comprobante firmado copiado al portapapeles');
+      });
+      row.appendChild(copyBtn);
+    }
+
+    listEl.appendChild(row);
+  }
 }
 
 function renderLastCheckinFooter() {
@@ -1261,6 +1676,12 @@ function setPunchButtonsDisabled(disabled) {
  * duplicate taps of the same type within 5 minutes.
  */
 function requestPunch(type, bypassDuplicateCheck = false) {
+  const config = loadConfig();
+  if (config && !config.isAdmin && (config.accountStatus === 'pendiente' || config.accountStatus === 'baja')) {
+    renderChecadorView();
+    return;
+  }
+
   const last = loadLastCheckin();
   if (
     !bypassDuplicateCheck &&
@@ -1288,8 +1709,6 @@ function getPositionPromise(options) {
 
 /**
  * Acquires mandatory GPS coordinates.
- * Tries high-accuracy satellite GPS first; if indoor concrete causes TIMEOUT/UNAVAILABLE,
- * performs one network/Wi-Fi geolocation fallback (still requiring real coordinates).
  */
 async function acquireMandatoryGps() {
   if (!('geolocation' in navigator)) {
@@ -1380,7 +1799,11 @@ function buildGpsFailureGuidance(err) {
   };
 }
 
-async function sendWebhookPost(scriptId, payload, { allowNotFound = false } = {}) {
+async function sendWebhookPost(
+  scriptId,
+  payload,
+  { allowNotFound = false, allowStatusGates = false } = {}
+) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 22000);
 
@@ -1410,7 +1833,20 @@ async function sendWebhookPost(scriptId, payload, { allowNotFound = false } = {}
       data &&
       (data.status === 'not_found' ||
         data.status === 'admin_pin_required' ||
-        data.status === 'admin_pin_invalid')
+        data.status === 'admin_pin_invalid' ||
+        data.status === 'auth_locked')
+    ) {
+      return data;
+    }
+
+    if (
+      allowStatusGates &&
+      data &&
+      (data.status === 'blocked' ||
+        data.status === 'pending_approval' ||
+        data.status === 'name_taken' ||
+        data.status === 'auth_locked' ||
+        data.status === 'not_found')
     ) {
       return data;
     }
@@ -1424,19 +1860,174 @@ async function sendWebhookPost(scriptId, payload, { allowNotFound = false } = {}
     return data;
   } catch (err) {
     if (err && err.name === 'AbortError') {
-      throw new Error('La conexión tardó demasiado. Verifica tu señal de internet e intenta de nuevo.');
+      const abortErr = new Error('La conexión tardó demasiado. Verifica tu señal de internet e intenta de nuevo.');
+      abortErr.isNetworkError = true;
+      throw abortErr;
     }
     if (!navigator.onLine) {
-      throw new Error('Sin conexión a internet. Activa tus datos móviles o Wi-Fi.');
+      const offErr = new Error('Sin conexión a internet. Activa tus datos móviles o Wi-Fi.');
+      offErr.isNetworkError = true;
+      throw offErr;
     }
     if (err instanceof TypeError) {
-      throw new Error(
+      const netErr = new Error(
         'No se pudo conectar con Google Apps Script. Revisa tu conexión a internet o confirma con tu administrador que el script esté implementado con acceso para "Cualquier usuario".'
       );
+      netErr.isNetworkError = true;
+      throw netErr;
     }
     throw err;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+function enqueueOfflinePunch({
+  config,
+  type,
+  lat,
+  lng,
+  accuracy,
+  rawAccuracy,
+  device
+}) {
+  const queueId = `q_${Date.now()}_${generateRandomHex8()}`;
+  const queuedAtIso = new Date().toISOString();
+  const localCaptureTime = formatNowLocalString();
+
+  const item = {
+    queueId,
+    scriptId: config.scriptId,
+    orgName: config.orgName,
+    sheetId: config.sheetId || '',
+    workerId: config.workerId,
+    workerName: config.workerName,
+    deviceId: device.deviceId,
+    deviceLabel: device.deviceLabel,
+    type,
+    lat,
+    lng,
+    accuracy,
+    rawAccuracy,
+    queuedAtIso,
+    localCaptureTime
+  };
+
+  const queue = loadOfflineQueue();
+  queue.push(item);
+  saveOfflineQueue(queue);
+
+  saveLastCheckin({
+    type,
+    serverTime: localCaptureTime,
+    timeZone: 'Cola Offline',
+    recordedAtMs: Date.now()
+  });
+
+  addPunchHistoryEntry({
+    queueId,
+    workerId: config.workerId,
+    workerName: config.workerName,
+    orgName: config.orgName,
+    sheetId: config.sheetId || '',
+    type,
+    serverTime: localCaptureTime,
+    timeZone: 'Cola Offline',
+    folio: '',
+    seal: '',
+    accuracy,
+    status: 'queued'
+  });
+
+  renderSmartShiftState();
+  renderOfflineQueueBanner();
+  renderWorkerHistory();
+  renderLastCheckinFooter();
+
+  showToast(`📡 ${type} guardada en Cola Offline. Se enviará al recuperar señal.`, 3800);
+}
+
+async function syncOfflineQueue({ silent = false } = {}) {
+  if (state.syncingOfflineQueue || !navigator.onLine) return;
+  const queue = loadOfflineQueue();
+  if (queue.length === 0) {
+    renderOfflineQueueBanner();
+    return;
+  }
+
+  state.syncingOfflineQueue = true;
+  if (el['btn-sync-offline-now']) {
+    el['btn-sync-offline-now'].disabled = true;
+    el['btn-sync-offline-now'].textContent = 'Sincronizando…';
+  }
+
+  let syncedCount = 0;
+  const remaining = [];
+
+  try {
+    for (const item of queue) {
+      try {
+        const res = await sendWebhookPost(
+          item.scriptId,
+          {
+            sheetId: item.sheetId || '',
+            workerId: item.workerId,
+            workerName: item.workerName,
+            deviceId: item.deviceId,
+            deviceLabel: item.deviceLabel,
+            type: item.type,
+            lat: item.lat,
+            lng: item.lng,
+            accuracy: item.accuracy,
+            rawAccuracy: item.rawAccuracy,
+            offlineQueuedAt: item.queuedAtIso
+          },
+          { allowStatusGates: true }
+        );
+
+        if (res && res.status === 'ok') {
+          syncedCount++;
+          updateQueuedHistoryEntry(item.queueId, {
+            status: 'confirmed',
+            serverTime: res.localTime || item.localCaptureTime,
+            timeZone: res.timeZone || 'Local',
+            folio: res.folio || '',
+            seal: res.seal || ''
+          });
+        } else if (res && (res.status === 'blocked' || res.status === 'pending_approval')) {
+          // Account was deactivated or is unapproved -> discard offline item and update local gate
+          updateQueuedHistoryEntry(item.queueId, { remove: true });
+          const currentConfig = loadConfig();
+          if (currentConfig && currentConfig.workerId === item.workerId) {
+            currentConfig.accountStatus = res.status === 'blocked' ? 'baja' : 'pendiente';
+            saveConfig(currentConfig);
+          }
+        } else {
+          remaining.push(item);
+        }
+      } catch {
+        remaining.push(item);
+      }
+    }
+
+    saveOfflineQueue(remaining);
+    if (state.currentView === 'checador') {
+      renderChecadorView();
+    } else {
+      renderOfflineQueueBanner();
+    }
+
+    if (syncedCount > 0 && !silent) {
+      showToast(`✅ Se sincronizaron ${syncedCount} registro(s) pendientes.`, 3400);
+    } else if (syncedCount > 0 && silent) {
+      showToast(`📡 Cola Offline sincronizada (${syncedCount} registro(s))`, 3000);
+    }
+  } finally {
+    state.syncingOfflineQueue = false;
+    if (el['btn-sync-offline-now']) {
+      el['btn-sync-offline-now'].disabled = false;
+      el['btn-sync-offline-now'].textContent = 'Sincronizar';
+    }
   }
 }
 
@@ -1449,19 +2040,9 @@ async function executePunch(type) {
 
   state.lastAttemptedPunchType = type;
   el['punch-error-box'].hidden = true;
-
-  if (!navigator.onLine) {
-    renderPunchError({
-      title: 'Sin conexión a internet',
-      description: 'Necesitas conexión de datos móviles o Wi-Fi para registrar la hora oficial en el servidor.',
-      steps: ['Activa tus datos móviles o conéctate a una red Wi-Fi y presiona Reintentar.']
-    });
-    return;
-  }
-
   setPunchButtonsDisabled(true);
 
-  // Step 1: GPS Acquisition
+  // Step 1: GPS Acquisition (works via satellite even when offline!)
   el['punch-loading-title'].textContent = 'Obteniendo ubicación GPS…';
   el['punch-loading-sub'].textContent = 'Autoriza el permiso si tu navegador lo solicita.';
   el['punch-loading-box'].hidden = false;
@@ -1477,47 +2058,107 @@ async function executePunch(type) {
 
   const lat = Number(position.coords.latitude.toFixed(6));
   const lng = Number(position.coords.longitude.toFixed(6));
-  const accuracy = Number((position.coords.accuracy || 0).toFixed(1));
+  const rawAccuracy = Number(position.coords.accuracy || 0);
+  const accuracy = Number(rawAccuracy.toFixed(1));
   const device = getDeviceIdentity();
+
+  // If currently offline, store directly in the Offline Queue after verifying real GPS!
+  if (!navigator.onLine) {
+    el['punch-loading-box'].hidden = true;
+    setPunchButtonsDisabled(false);
+    enqueueOfflinePunch({
+      config,
+      type,
+      lat,
+      lng,
+      accuracy,
+      rawAccuracy,
+      device
+    });
+    return;
+  }
 
   // Step 2: HTTP POST to Google Apps Script
   el['punch-loading-title'].textContent = 'Enviando registro…';
   el['punch-loading-sub'].textContent = 'Confirmando hora oficial con el servidor de Google.';
 
   try {
-    const result = await sendWebhookPost(config.scriptId, {
-      sheetId: config.sheetId || '',
-      workerId: config.workerId,
-      workerName: config.workerName,
-      deviceId: device.deviceId,
-      deviceLabel: device.deviceLabel,
-      type,
-      lat,
-      lng,
-      accuracy
-    });
+    const result = await sendWebhookPost(
+      config.scriptId,
+      {
+        sheetId: config.sheetId || '',
+        workerId: config.workerId,
+        workerName: config.workerName,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel,
+        type,
+        lat,
+        lng,
+        accuracy,
+        rawAccuracy
+      },
+      { allowStatusGates: true }
+    );
+
+    if (result && result.status === 'blocked') {
+      config.accountStatus = 'baja';
+      saveConfig(config);
+      el['punch-loading-box'].hidden = true;
+      renderChecadorView();
+      showToast(result.message || 'Acceso desactivado por el administrador.', 3800);
+      return;
+    }
+
+    if (result && result.status === 'pending_approval') {
+      config.accountStatus = 'pendiente';
+      saveConfig(config);
+      el['punch-loading-box'].hidden = true;
+      renderChecadorView();
+      showToast(result.message || 'Tu perfil está pendiente de aprobación por el administrador.', 3800);
+      return;
+    }
 
     // If the server returned the canonical frozen workerName or workerId from the Trabajadores tab, sync locally
     const resolvedWorkerName = result.workerName || config.workerName;
     const resolvedWorkerId = normalizeWorkerId8(result.workerId) || config.workerId;
+    config.accountStatus = 'activo';
     if (resolvedWorkerName !== config.workerName || resolvedWorkerId !== config.workerId) {
       config.workerName = resolvedWorkerName;
       config.workerId = resolvedWorkerId;
-      saveConfig(config);
       el['checador-worker-name'].textContent = config.workerName;
       el['checador-worker-id'].textContent = formatWorkerId8(config.workerId);
     }
+    saveConfig(config);
 
     const checkinRecord = {
       type,
       serverTime: result.localTime,
       timeZone: result.timeZone || '',
+      folio: result.folio || '',
+      seal: result.seal || '',
       recordedAtMs: Date.now()
     };
     saveLastCheckin(checkinRecord);
 
+    addPunchHistoryEntry({
+      id: `h_${Date.now()}`,
+      workerId: config.workerId,
+      workerName: config.workerName,
+      orgName: config.orgName,
+      sheetId: config.sheetId || '',
+      type,
+      serverTime: result.localTime,
+      timeZone: result.timeZone || 'Local',
+      folio: result.folio || '',
+      seal: result.seal || '',
+      accuracy,
+      status: 'confirmed'
+    });
+
     el['punch-loading-box'].hidden = true;
     setPunchButtonsDisabled(false);
+    renderSmartShiftState();
+    renderWorkerHistory();
     renderLastCheckinFooter();
 
     if (navigator.vibrate) navigator.vibrate([45, 50, 45]);
@@ -1529,10 +2170,26 @@ async function executePunch(type) {
       localTime: result.localTime,
       timeZone: result.timeZone || 'Local',
       accuracy,
+      folio: result.folio || '',
       seal: result.seal || ''
     });
   } catch (netErr) {
+    el['punch-loading-box'].hidden = true;
     setPunchButtonsDisabled(false);
+
+    if (!navigator.onLine) {
+      enqueueOfflinePunch({
+        config,
+        type,
+        lat,
+        lng,
+        accuracy,
+        rawAccuracy,
+        device
+      });
+      return;
+    }
+
     renderPunchError({
       title: 'No se pudo enviar el registro',
       description: (netErr && netErr.message) || 'Ocurrió un problema de red al contactar Google Sheets.',
@@ -1541,7 +2198,17 @@ async function executePunch(type) {
   }
 }
 
-function showSuccessReceiptModal({ type, workerName, workerId, orgName, localTime, timeZone, accuracy, seal }) {
+function showSuccessReceiptModal({
+  type,
+  workerName,
+  workerId,
+  orgName,
+  localTime,
+  timeZone,
+  accuracy,
+  folio = '',
+  seal = ''
+}) {
   const isEntrada = type === 'ENTRADA';
   const parts = formatServerTimeParts(localTime);
 
@@ -1559,6 +2226,15 @@ function showSuccessReceiptModal({ type, workerName, workerId, orgName, localTim
   el['success-timezone'].textContent = timeZone;
   el['success-accuracy'].textContent = `±${Math.round(accuracy)} m`;
 
+  if (el['success-folio-row'] && el['success-folio']) {
+    if (folio) {
+      el['success-folio'].textContent = folio;
+      el['success-folio-row'].hidden = false;
+    } else {
+      el['success-folio-row'].hidden = true;
+    }
+  }
+
   if (seal) {
     el['success-seal'].textContent = seal;
     el['success-seal-row'].hidden = false;
@@ -1566,11 +2242,169 @@ function showSuccessReceiptModal({ type, workerName, workerId, orgName, localTim
     el['success-seal-row'].hidden = true;
   }
 
+  state.lastReceiptText = buildSignedReceiptText({
+    type,
+    workerName,
+    workerId,
+    orgName,
+    localTime,
+    folio,
+    seal
+  });
+
+  if (el['btn-copy-receipt']) {
+    el['btn-copy-receipt'].hidden = !seal;
+  }
+
   openModal('modal-success', 'btn-close-success');
 }
 
 /* ==========================================================================
-   View 4: Administrator Panel (/admin) — Profile, Catalog & 1-Click Sheet Creator
+   Kiosk Mode (Shared Tablet / Guardhouse Terminal by 8-Digit ID)
+   ========================================================================== */
+
+function openKioskModal() {
+  const config = loadConfig();
+  if (!config) return;
+  closeModal('modal-account');
+
+  if (el['kiosk-title']) {
+    el['kiosk-title'].textContent = config.orgName;
+  }
+  if (el['input-kiosk-id']) {
+    el['input-kiosk-id'].value = '';
+  }
+  if (el['kiosk-feedback-box']) {
+    el['kiosk-feedback-box'].hidden = true;
+    el['kiosk-feedback-box'].textContent = '';
+  }
+
+  openModal('modal-kiosk', 'input-kiosk-id');
+}
+
+function handleKioskNumpadKey(key) {
+  const input = el['input-kiosk-id'];
+  if (!input) return;
+  const currentDigits = String(input.value || '').replace(/\D+/g, '');
+
+  if (key === 'clear') {
+    input.value = '';
+    return;
+  }
+  if (key === 'back') {
+    input.value = formatPartialWorkerIdInput(currentDigits.slice(0, -1));
+    return;
+  }
+  if (/^\d$/.test(key) && currentDigits.length < 8) {
+    input.value = formatPartialWorkerIdInput(currentDigits + key);
+  }
+}
+
+async function handleKioskPunch(type) {
+  const config = loadConfig();
+  if (!config || !el['input-kiosk-id'] || !el['kiosk-feedback-box']) return;
+
+  const feedback = el['kiosk-feedback-box'];
+  const digits8 = normalizeWorkerId8(el['input-kiosk-id'].value);
+
+  if (!digits8) {
+    feedback.className = 'alert alert-error';
+    feedback.textContent = 'Ingresa tu ID completo de 8 dígitos numéricos.';
+    feedback.hidden = false;
+    return;
+  }
+
+  const btnIn = el['btn-kiosk-in'];
+  const btnOut = el['btn-kiosk-out'];
+  btnIn.disabled = true;
+  btnOut.disabled = true;
+
+  feedback.className = 'alert alert-amber';
+  feedback.textContent = 'Verificando ID y registrando asistencia…';
+  feedback.hidden = false;
+
+  try {
+    const device = getDeviceIdentity();
+
+    // Step 1: Verify worker ID in Trabajadores first so unknown/baja/pending IDs are rejected immediately
+    const loginRes = await sendWebhookPost(
+      config.scriptId,
+      {
+        action: 'login_worker',
+        sheetId: config.sheetId || '',
+        workerId: digits8,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel
+      },
+      { allowNotFound: true, allowStatusGates: true }
+    );
+
+    if (!loginRes || loginRes.status === 'not_found') {
+      feedback.className = 'alert alert-error';
+      feedback.textContent = `El ID ${formatWorkerId8(digits8)} no existe en el directorio de trabajadores de "${config.orgName}".`;
+      return;
+    }
+
+    if (loginRes.status === 'blocked') {
+      feedback.className = 'alert alert-error';
+      feedback.textContent = loginRes.message || `El ID ${formatWorkerId8(digits8)} fue dado de baja por el administrador.`;
+      return;
+    }
+
+    if (loginRes.status === 'pending_approval') {
+      feedback.className = 'alert alert-amber';
+      feedback.textContent = loginRes.message || `El ID ${formatWorkerId8(digits8)} aún está pendiente de aprobación por el administrador.`;
+      return;
+    }
+
+    const resolvedName = loginRes.workerName || 'Trabajador';
+
+    // Step 2: Acquire GPS on Kiosk terminal
+    const position = await acquireMandatoryGps();
+    const lat = Number(position.coords.latitude.toFixed(6));
+    const lng = Number(position.coords.longitude.toFixed(6));
+    const accuracy = Number((position.coords.accuracy || 0).toFixed(1));
+
+    // Step 3: Record Kiosk punch
+    const punchRes = await sendWebhookPost(
+      config.scriptId,
+      {
+        sheetId: config.sheetId || '',
+        workerId: digits8,
+        workerName: resolvedName,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel,
+        isKiosk: true,
+        type,
+        lat,
+        lng,
+        accuracy
+      },
+      { allowStatusGates: true }
+    );
+
+    if (punchRes && punchRes.status === 'ok') {
+      const parts = formatServerTimeParts(punchRes.localTime);
+      feedback.className = 'alert alert-success';
+      feedback.textContent =
+        `✅ ${type} confirmada: ${punchRes.workerName || resolvedName} (ID ${formatWorkerId8(digits8)}) · ${parts.time12h}`;
+      el['input-kiosk-id'].value = '';
+      if (navigator.vibrate) navigator.vibrate([45, 50, 45]);
+    } else {
+      feedback.className = 'alert alert-error';
+      feedback.textContent = (punchRes && punchRes.message) || 'No se pudo registrar la marca en Kiosco.';
+    }
+  } catch (err) {
+    feedback.className = 'alert alert-error';
+    feedback.textContent = (err && err.message) || 'Error al registrar en Modo Kiosco.';
+  } finally {
+    btnIn.disabled = false;
+    btnOut.disabled = false;
+  }
+}
+
+/* ==========================================================================
+   View 4: Administrator Panel (/admin) — Profile, Catalog, Sheets & Workers
    ========================================================================== */
 
 function loadAdminModules() {
@@ -1608,12 +2442,11 @@ function saveLocalAdminCatalog(scriptId, sheets) {
   }
 }
 
-async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false } = {}) {
+async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false, refreshWorkers = true } = {}) {
   if (!state.activeAdminAccess || !sheetEntry) return;
   const [qrMod] = await loadAdminModules();
   const scriptId = state.activeAdminAccess.scriptId;
   const orgName = (sheetEntry.orgName || state.activeAdminAccess.orgName || 'Empresa').trim();
-  // Primary sheet uses empty sid for compact backward-compatible QR unless it's a secondary sheet
   const sheetId = sheetEntry.isPrimary ? '' : (sheetEntry.sheetId || '').trim();
   const sheetUrl = (sheetEntry.sheetUrl || '').trim();
 
@@ -1631,7 +2464,6 @@ async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false } = {}) 
   };
 
   // Automatically sync the Admin's personal Checador config to the selected sheet
-  // so clicking "Ir a mi Checador" punches into whichever sheet is currently selected in "Mis Hojas"
   const existingConfig = loadConfig();
   if (existingConfig && existingConfig.isAdmin && existingConfig.scriptId === scriptId) {
     const changedSheet =
@@ -1668,6 +2500,11 @@ async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false } = {}) 
   });
 
   renderAdminSheetsCatalog();
+  renderAdminWorkersList();
+
+  if (refreshWorkers) {
+    refreshAdminWorkersForActiveSheet({ silent: true });
+  }
 
   if (scrollToPoster && window.innerWidth < 1060) {
     el['admin-output-card'].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1751,7 +2588,7 @@ function renderAdminSheetsCatalog() {
     selectBtn.appendChild(nameSpan);
     selectBtn.appendChild(metaSpan);
     selectBtn.addEventListener('click', () => {
-      setActiveAdminSheet(item, { scrollToPoster: false });
+      setActiveAdminSheet(item, { scrollToPoster: false, refreshWorkers: true });
       showToast(`Hoja activa (QR y Checador): ${item.orgName}`);
     });
 
@@ -1771,6 +2608,210 @@ function renderAdminSheetsCatalog() {
   }
 
   renderAdminSourceSheetSelect(sheets, activeRawSid, activeOrg);
+}
+
+function renderAdminWorkersList() {
+  const listEl = el['admin-workers-list'];
+  const statsEl = el['admin-workers-stats'];
+  if (!listEl || !statsEl) return;
+
+  const workers = Array.isArray(state.adminWorkersList) ? state.adminWorkersList.slice() : [];
+
+  // Sort: 🟡 Pendiente first, then 🟢 Activo, then 🔴 Baja
+  const priority = { pendiente: 0, activo: 1, baja: 2 };
+  workers.sort((a, b) => {
+    const pa = priority[a.accountStatus] ?? 1;
+    const pb = priority[b.accountStatus] ?? 1;
+    if (pa !== pb) return pa - pb;
+    return String(a.workerName || '').localeCompare(String(b.workerName || ''));
+  });
+
+  let pendingCount = 0;
+  let activeCount = 0;
+  let bajaCount = 0;
+
+  for (const w of workers) {
+    if (w.accountStatus === 'pendiente') pendingCount++;
+    else if (w.accountStatus === 'baja') bajaCount++;
+    else activeCount++;
+  }
+
+  statsEl.innerHTML = '';
+  const pills = [
+    { text: `🟡 ${pendingCount} pendiente(s)`, cls: 'is-pending' },
+    { text: `🟢 ${activeCount} activo(s)`, cls: 'is-active' },
+    { text: `🔴 ${bajaCount} baja(s)`, cls: 'is-baja' }
+  ];
+  for (const p of pills) {
+    const span = document.createElement('span');
+    span.className = `admin-worker-stat-pill ${p.cls}`;
+    span.textContent = p.text;
+    statsEl.appendChild(span);
+  }
+
+  listEl.innerHTML = '';
+  if (workers.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.fontSize = '0.8rem';
+    empty.style.color = 'var(--ink-muted)';
+    empty.textContent = 'Aún no hay trabajadores registrados en esta hoja.';
+    listEl.appendChild(empty);
+    return;
+  }
+
+  for (const w of workers) {
+    const item = document.createElement('div');
+    const st = w.accountStatus || 'activo';
+    item.className = `admin-worker-item${st === 'pendiente' ? ' is-pending' : (st === 'baja' ? ' is-baja' : '')}`;
+    item.setAttribute('role', 'listitem');
+
+    const top = document.createElement('div');
+    top.className = 'admin-worker-top';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'admin-worker-name';
+    nameSpan.textContent = w.workerName + (w.isAdmin ? ' (Admin)' : '');
+
+    const idSpan = document.createElement('span');
+    idSpan.className = 'admin-worker-id';
+    idSpan.textContent = w.formattedWorkerId || formatWorkerId8(w.workerId);
+
+    top.appendChild(nameSpan);
+    top.appendChild(idSpan);
+    item.appendChild(top);
+
+    const bottom = document.createElement('div');
+    bottom.className = 'admin-worker-bottom';
+
+    const statusTag = document.createElement('span');
+    statusTag.className = 'admin-worker-status-tag';
+    statusTag.textContent = w.accountStatusLabel || (st === 'pendiente' ? '🟡 Pendiente' : (st === 'baja' ? '🔴 Baja' : '🟢 Activo'));
+    bottom.appendChild(statusTag);
+
+    if (!w.isAdmin && !String(w.workerId || '').startsWith('9')) {
+      const actions = document.createElement('div');
+      actions.className = 'admin-worker-actions';
+
+      if (st === 'pendiente') {
+        const approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
+        approveBtn.className = 'btn-worker-action is-approve';
+        approveBtn.textContent = '✅ Aprobar';
+        approveBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'activo'));
+        actions.appendChild(approveBtn);
+
+        const rejectBtn = document.createElement('button');
+        rejectBtn.type = 'button';
+        rejectBtn.className = 'btn-worker-action is-baja';
+        rejectBtn.textContent = '🚫 Dar de baja';
+        rejectBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'baja'));
+        actions.appendChild(rejectBtn);
+      } else if (st === 'activo') {
+        const bajaBtn = document.createElement('button');
+        bajaBtn.type = 'button';
+        bajaBtn.className = 'btn-worker-action is-baja';
+        bajaBtn.textContent = '🚫 Dar de baja';
+        bajaBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'baja'));
+        actions.appendChild(bajaBtn);
+      } else if (st === 'baja') {
+        const reactivateBtn = document.createElement('button');
+        reactivateBtn.type = 'button';
+        reactivateBtn.className = 'btn-worker-action is-approve';
+        reactivateBtn.textContent = '🔄 Reactivar';
+        reactivateBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'activo'));
+        actions.appendChild(reactivateBtn);
+      }
+
+      bottom.appendChild(actions);
+    }
+
+    item.appendChild(bottom);
+    listEl.appendChild(item);
+  }
+}
+
+function getCurrentAdminPin() {
+  const existingConfig = loadConfig();
+  const rawPin =
+    (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : '') ||
+    state.adminPin ||
+    (existingConfig && existingConfig.adminPin ? existingConfig.adminPin : '');
+  return normalizeAdminPin4(rawPin);
+}
+
+async function refreshAdminWorkersForActiveSheet({ silent = false } = {}) {
+  if (!state.activeAdminAccess || !state.activeAdminAccess.scriptId) return;
+  const adminPin = getCurrentAdminPin();
+
+  if (el['btn-refresh-workers'] && !silent) {
+    el['btn-refresh-workers'].disabled = true;
+    el['btn-refresh-workers'].textContent = 'Cargando…';
+  }
+
+  try {
+    const res = await sendWebhookPost(
+      state.activeAdminAccess.scriptId,
+      {
+        action: 'admin_list_workers',
+        sheetId: state.activeAdminAccess.sheetId || '',
+        adminPin
+      },
+      { allowStatusGates: true }
+    );
+    if (res && res.status === 'ok' && Array.isArray(res.workers)) {
+      state.adminWorkersList = res.workers;
+      renderAdminWorkersList();
+      if (!silent) {
+        showToast('Directorio de trabajadores actualizado');
+      }
+    }
+  } catch {
+    // Non-fatal if offline or mock server does not implement admin_list_workers
+  } finally {
+    if (el['btn-refresh-workers'] && !silent) {
+      el['btn-refresh-workers'].disabled = false;
+      el['btn-refresh-workers'].textContent = '🔄 Actualizar';
+    }
+  }
+}
+
+async function handleAdminSetWorkerStatus(workerId, newStatus) {
+  if (!state.activeAdminAccess || !state.activeAdminAccess.scriptId) return;
+  const adminPin = getCurrentAdminPin();
+
+  try {
+    const res = await sendWebhookPost(
+      state.activeAdminAccess.scriptId,
+      {
+        action: 'admin_set_worker_status',
+        sheetId: state.activeAdminAccess.sheetId || '',
+        adminPin,
+        workerId,
+        newStatus
+      },
+      { allowStatusGates: true }
+    );
+
+    if (res && res.status === 'ok') {
+      if (Array.isArray(res.workers)) {
+        state.adminWorkersList = res.workers;
+      } else {
+        for (const w of state.adminWorkersList) {
+          if (w.workerId === workerId) {
+            w.accountStatus = newStatus;
+            w.accountStatusLabel = newStatus === 'baja' ? '🔴 Baja' : (newStatus === 'pendiente' ? '🟡 Pendiente' : '🟢 Activo');
+          }
+        }
+      }
+      renderAdminWorkersList();
+      const label = newStatus === 'baja' ? 'dado de baja (🔴 Baja)' : 'aprobado (🟢 Activo)';
+      showToast(`${res.workerName || 'Trabajador'} ${label}`);
+    } else if (res && res.message) {
+      showToast(res.message, 3500);
+    }
+  } catch (err) {
+    showToast((err && err.message) || 'No se pudo actualizar el estatus del trabajador.');
+  }
 }
 
 function renderAdminSessionSummary(config) {
@@ -1871,7 +2912,6 @@ async function initAdminPanel() {
   }
 
   // If the Admin navigated here from their Checador ("Panel de Admin / Hojas"), auto-open their QR & Catalog
-  // preserving whichever sheet was currently selected in their Checador!
   if (!state.activeAdminAccess && existingConfig && existingConfig.isAdmin && existingConfig.scriptId) {
     try {
       await loadAdminModules();
@@ -1898,7 +2938,7 @@ async function initAdminPanel() {
         existingConfig.sheetId,
         existingConfig.orgName
       );
-      await setActiveAdminSheet(matchedEntry, { scrollToPoster: false });
+      await setActiveAdminSheet(matchedEntry, { scrollToPoster: false, refreshWorkers: true });
     } catch {
       // Ignore auto-init errors
     }
@@ -1983,6 +3023,7 @@ async function handleAdminGenerate(event) {
       workerName: adminName,
       isAdmin: true,
       adminPin,
+      accountStatus: 'activo',
       privacyAccepted: true,
       configuredAt: new Date().toISOString()
     };
@@ -2028,21 +3069,32 @@ async function handleAdminGenerate(event) {
       prevSelectedSheetId,
       prevSelectedOrg
     );
-    await setActiveAdminSheet(initialTarget, { scrollToPoster: true });
+    await setActiveAdminSheet(initialTarget, { scrollToPoster: true, refreshWorkers: false });
     showToast(`Perfil Admin listo · ID ${formatWorkerId8(adminId)}`);
 
     // Sync Admin Profile (ID + Name + 4-digit PIN) & Sheets Catalog with Google Apps Script
     try {
       const device = getDeviceIdentity();
-      const authRes = await sendWebhookPost(parsedUrl.scriptId, {
-        action: 'admin_auth',
-        orgName,
-        adminId,
-        adminName,
-        adminPin,
-        deviceId: device.deviceId,
-        deviceLabel: device.deviceLabel
-      });
+      const authRes = await sendWebhookPost(
+        parsedUrl.scriptId,
+        {
+          action: 'admin_auth',
+          orgName,
+          adminId,
+          adminName,
+          adminPin,
+          deviceId: device.deviceId,
+          deviceLabel: device.deviceLabel
+        },
+        { allowStatusGates: true }
+      );
+
+      if (authRes && authRes.status === 'auth_locked') {
+        el['admin-form-error'].textContent = authRes.message;
+        el['admin-form-error'].hidden = false;
+        return;
+      }
+
       if (authRes && authRes.status === 'ok') {
         const canonicalAdminId = normalizeWorkerId8(authRes.adminId) || adminId;
         const canonicalAdminName = authRes.adminName || adminName;
@@ -2059,6 +3111,10 @@ async function handleAdminGenerate(event) {
             el['admin-worker-name'].value = canonicalAdminName;
           }
         }
+        if (Array.isArray(authRes.workers)) {
+          state.adminWorkersList = authRes.workers;
+          renderAdminWorkersList();
+        }
         if (Array.isArray(authRes.sheets) && authRes.sheets.length > 0) {
           state.adminSheetsCatalog = authRes.sheets;
           saveLocalAdminCatalog(parsedUrl.scriptId, authRes.sheets);
@@ -2067,11 +3123,11 @@ async function handleAdminGenerate(event) {
             state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId,
             state.activeAdminAccess.orgName
           );
-          await setActiveAdminSheet(refreshedTarget, { scrollToPoster: false });
+          await setActiveAdminSheet(refreshedTarget, { scrollToPoster: false, refreshWorkers: false });
         }
       }
     } catch (syncErr) {
-      if (syncErr && /PIN/i.test(String(syncErr.message || ''))) {
+      if (syncErr && (/PIN/i.test(String(syncErr.message || '')) || /intento/i.test(String(syncErr.message || '')) || /bloquead/i.test(String(syncErr.message || '')))) {
         el['admin-form-error'].textContent = syncErr.message;
         el['admin-form-error'].hidden = false;
       }
@@ -2092,12 +3148,7 @@ async function handleAdminCreateSheet(event) {
 
   const newOrgName = (el['new-sheet-org-name'].value || '').trim().replace(/\s+/g, ' ');
   const copyWorkers = el['new-sheet-copy-workers'].checked === true;
-  const existingConfig = loadConfig();
-  const rawPin =
-    (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : '') ||
-    state.adminPin ||
-    (existingConfig && existingConfig.adminPin ? existingConfig.adminPin : '');
-  const adminPin = normalizeAdminPin4(rawPin);
+  const adminPin = getCurrentAdminPin();
 
   if (newOrgName.length < 2) {
     statusBox.className = 'alert alert-error';
@@ -2126,14 +3177,25 @@ async function handleAdminCreateSheet(event) {
     );
     const sourceLabel = sourceEntry ? sourceEntry.orgName : state.activeAdminAccess.orgName;
 
-    const result = await sendWebhookPost(state.activeAdminAccess.scriptId, {
-      action: 'admin_create_sheet',
-      orgName: newOrgName,
-      newOrgName,
-      copyWorkers,
-      sourceSheetId: selectedSourceSid,
-      adminPin
-    });
+    const result = await sendWebhookPost(
+      state.activeAdminAccess.scriptId,
+      {
+        action: 'admin_create_sheet',
+        orgName: newOrgName,
+        newOrgName,
+        copyWorkers,
+        sourceSheetId: selectedSourceSid,
+        adminPin
+      },
+      { allowStatusGates: true }
+    );
+
+    if (result && result.status === 'auth_locked') {
+      statusBox.className = 'alert alert-error';
+      statusBox.textContent = result.message;
+      statusBox.hidden = false;
+      return;
+    }
 
     const createdItem = result.createdSheet || result.newSheet || {
       sheetId: result.sheetId,
@@ -2143,6 +3205,10 @@ async function handleAdminCreateSheet(event) {
       isPrimary: false
     };
 
+    if (Array.isArray(result.workers)) {
+      state.adminWorkersList = result.workers;
+    }
+
     if (Array.isArray(result.sheets) && result.sheets.length > 0) {
       state.adminSheetsCatalog = result.sheets;
       saveLocalAdminCatalog(state.activeAdminAccess.scriptId, result.sheets);
@@ -2151,7 +3217,7 @@ async function handleAdminCreateSheet(event) {
       saveLocalAdminCatalog(state.activeAdminAccess.scriptId, state.adminSheetsCatalog);
     }
 
-    await setActiveAdminSheet(createdItem, { scrollToPoster: true });
+    await setActiveAdminSheet(createdItem, { scrollToPoster: true, refreshWorkers: false });
 
     // Reset form fields and keep copyWorkers unchecked by default
     el['new-sheet-org-name'].value = '';
@@ -2220,10 +3286,10 @@ async function handleAdminTestConnection() {
 }
 
 /* ==========================================================================
-   Modals & Account Menu (Cambiar QR/Hoja, Cambiar sesión, Cerrar sesión)
+   Modals & Account Menu (Cambiar QR/Hoja, Cambiar sesión, Kiosco, Cerrar sesión)
    ========================================================================== */
 
-const MODAL_IDS = ['modal-success', 'modal-confirm-repeat', 'modal-account', 'modal-worker-id'];
+const MODAL_IDS = ['modal-success', 'modal-confirm-repeat', 'modal-account', 'modal-worker-id', 'modal-kiosk'];
 
 function syncBodyModalLock() {
   const anyOpen = MODAL_IDS.some((id) => el[id] && !el[id].hidden);
@@ -2377,13 +3443,26 @@ function bindEvents() {
     routeFromCurrentState();
   });
 
-  // Online / Offline connectivity indicator
+  // Online / Offline connectivity indicator + Automatic Offline Queue Sync
   const syncOnlineBanner = () => {
     el['offline-banner'].hidden = navigator.onLine;
+    if (navigator.onLine) {
+      syncOfflineQueue({ silent: true });
+    }
   };
   window.addEventListener('online', syncOnlineBanner);
   window.addEventListener('offline', syncOnlineBanner);
   syncOnlineBanner();
+
+  if (el['btn-sync-offline-now']) {
+    el['btn-sync-offline-now'].addEventListener('click', () => {
+      syncOfflineQueue({ silent: false });
+    });
+  }
+
+  if (el['btn-check-approval-status']) {
+    el['btn-check-approval-status'].addEventListener('click', handleCheckApprovalStatus);
+  }
 
   // View 1: QR Scanner & Paste Invite
   el['btn-open-scanner'].addEventListener('click', () => {
@@ -2529,7 +3608,7 @@ function bindEvents() {
             picked.orgName
           );
           if (matched) {
-            setActiveAdminSheet(matched, { scrollToPoster: false });
+            setActiveAdminSheet(matched, { scrollToPoster: false, refreshWorkers: false });
           }
         }
         renderChecadorView();
@@ -2551,6 +3630,12 @@ function bindEvents() {
       if (el['new-sheet-source-box']) {
         el['new-sheet-source-box'].hidden = !el['new-sheet-copy-workers'].checked;
       }
+    });
+  }
+
+  if (el['btn-refresh-workers']) {
+    el['btn-refresh-workers'].addEventListener('click', () => {
+      refreshAdminWorkersForActiveSheet({ silent: false });
     });
   }
 
@@ -2657,6 +3742,13 @@ function bindEvents() {
   el['btn-test-connection'].addEventListener('click', handleAdminTestConnection);
 
   // Modal 1: Receipt Success
+  if (el['btn-copy-receipt']) {
+    el['btn-copy-receipt'].addEventListener('click', async () => {
+      if (!state.lastReceiptText) return;
+      await copyTextToClipboard(state.lastReceiptText);
+      showToast('Comprobante firmado copiado al portapapeles');
+    });
+  }
   el['btn-close-success'].addEventListener('click', () => closeModal('modal-success'));
 
   // Modal 2: Duplicate Confirmation
@@ -2672,7 +3764,7 @@ function bindEvents() {
     closeModal('modal-confirm-repeat');
   });
 
-  // Modal 3: Account Menu (1. Cambiar QR / Hoja, 2. Cambiar sesión, 3. Cerrar sesión [Rojo])
+  // Modal 3: Account Menu (1. Cambiar QR / Hoja, 2. Cambiar sesión, 3. Modo Kiosco, 4. Cerrar sesión [Rojo])
   el['btn-switch-qr'].addEventListener('click', () => {
     const config = loadConfig();
     closeModal('modal-account');
@@ -2699,6 +3791,10 @@ function bindEvents() {
       isSessionSwitch: true
     });
   });
+
+  if (el['btn-open-kiosk']) {
+    el['btn-open-kiosk'].addEventListener('click', openKioskModal);
+  }
 
   el['btn-unlink-company'].addEventListener('click', () => {
     if (!state.unlinkConfirmArmed) {
@@ -2729,8 +3825,33 @@ function bindEvents() {
 
   el['btn-close-worker-id'].addEventListener('click', () => closeModal('modal-worker-id'));
 
+  // Modal 5: Kiosk Mode Terminal
+  if (el['btn-close-kiosk']) {
+    el['btn-close-kiosk'].addEventListener('click', () => closeModal('modal-kiosk'));
+  }
+  if (el['input-kiosk-id']) {
+    el['input-kiosk-id'].addEventListener('input', () => {
+      el['input-kiosk-id'].value = formatPartialWorkerIdInput(el['input-kiosk-id'].value);
+    });
+  }
+  if (el['modal-kiosk']) {
+    el['modal-kiosk'].addEventListener('click', (e) => {
+      const keyBtn = e.target.closest('[data-kiosk-key]');
+      if (keyBtn) {
+        handleKioskNumpadKey(keyBtn.getAttribute('data-kiosk-key'));
+      }
+    });
+  }
+  if (el['btn-kiosk-in']) {
+    el['btn-kiosk-in'].addEventListener('click', () => handleKioskPunch('ENTRADA'));
+  }
+  if (el['btn-kiosk-out']) {
+    el['btn-kiosk-out'].addEventListener('click', () => handleKioskPunch('SALIDA'));
+  }
+
   // Close modals on Escape key or backdrop click
   for (const modalId of MODAL_IDS) {
+    if (!el[modalId]) continue;
     el[modalId].addEventListener('click', (e) => {
       if (e.target === el[modalId]) {
         closeModal(modalId);
@@ -2741,7 +3862,7 @@ function bindEvents() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       for (const modalId of MODAL_IDS) {
-        if (!el[modalId].hidden) {
+        if (el[modalId] && !el[modalId].hidden) {
           closeModal(modalId);
         }
       }
