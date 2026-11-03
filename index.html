@@ -478,11 +478,12 @@
               </div>
               <div class="deploy-fields-box" style="margin-top: 0.65rem; background-color: #ECFDF5; border-color: #A7F3D0; color: #064E3B;">
                 <div>
-                  <strong>Pestañas mensuales, directorio de trabajadores, rastreo de celulares y sello HMAC incluidos:</strong>
-                  tu archivo de Google Sheets sigue siendo <strong>100% privado</strong>. El script crea automáticamente:
+                  <strong>Configuración única · Crea nuevas hojas en 1 clic desde tu perfil:</strong>
+                  este paso en Apps Script <strong>solo se hace una vez</strong>. El conector crea automáticamente:
                   <strong>1)</strong> una pestaña por cada mes (ej. <em>Noviembre 2026</em>, siempre al inicio),
-                  <strong>2)</strong> la pestaña <strong>Trabajadores</strong> que asigna un <strong>ID numérico de 8 dígitos</strong>, congela el nombre de cada empleado y registra la lista de celulares únicos utilizados (alertando si alguien ficha desde el celular de un compañero), y
-                  <strong>3)</strong> firma cada fila con un sello <code>HMAC-SHA256</code> auditable desde el menú <strong>&#128737;&#65039; Cronos</strong>.
+                  <strong>2)</strong> la pestaña <strong>Trabajadores</strong> que asigna un <strong>ID numérico de 8 dígitos</strong>, congela el nombre de cada empleado y registra cada celular con su número fijo (<code>#1 Titular</code>, <code>#2</code>, <code>#3</code>…),
+                  <strong>3)</strong> firma cada fila con un sello <code>HMAC-SHA256</code>, y
+                  <strong>4)</strong> habilita tu <strong>Perfil de Admin</strong> abajo para crear nuevas hojas (ej. <em>Asistencia 2027</em>) en 1 clic con un botón.
                 </div>
               </div>
             </li>
@@ -492,21 +493,21 @@
 
       <!-- Admin Generator & Output Grid -->
       <div class="admin-grid" id="admin-grid">
-        <!-- Form Column -->
+        <!-- Form & Admin Profile Column -->
         <div class="card no-print" id="admin-form-card">
           <div class="card-body">
-            <h2 class="view-title" style="font-size: 1.2rem; margin-bottom: 0.9rem;">Generar acceso para trabajadores</h2>
+            <h2 class="view-title" style="font-size: 1.2rem; margin-bottom: 0.9rem;">Perfil de Admin y Acceso</h2>
 
             <div class="alert alert-error" id="admin-form-error" role="alert" hidden></div>
 
             <form id="form-admin-generate" novalidate>
               <div class="field">
-                <label class="field-label" for="admin-org-name">Nombre de la Empresa</label>
+                <label class="field-label" for="admin-org-name">Nombre de la Empresa / Hoja</label>
                 <input
                   type="text"
                   id="admin-org-name"
                   class="input-text"
-                  placeholder="Ej. Limpieza Sonora"
+                  placeholder="Ej. Limpieza Sonora 2026"
                   maxlength="60"
                   required
                 >
@@ -523,13 +524,75 @@
                   spellcheck="false"
                   required
                 >
-                <p class="field-hint">Solo se extrae el identificador del script para crear un QR compacto.</p>
+                <p class="field-hint">Pega la URL <code>/exec</code> de tu conector (solo la configuras una vez).</p>
+              </div>
+
+              <div class="field">
+                <label class="field-label" for="admin-pin">PIN o Contraseña de Admin <span style="font-weight: 500; color: var(--text-muted);">(opcional)</span></label>
+                <input
+                  type="password"
+                  id="admin-pin"
+                  class="input-text"
+                  placeholder="Crea o ingresa tu PIN para sincronizar tus hojas"
+                  maxlength="40"
+                  autocomplete="current-password"
+                >
+                <p class="field-hint">Guarda tus hojas en tu conector y protege la creación de nuevos archivos en Drive.</p>
               </div>
 
               <button type="submit" class="btn btn-emerald btn-block" id="btn-generate-access">
-                Generar Acceso
+                Generar Acceso y Conectar Perfil
               </button>
             </form>
+
+            <!-- Admin Profile: Catalog of Sheets + 1-Click New Sheet Creator -->
+            <div class="admin-sheets-panel" id="admin-sheets-panel" hidden>
+              <div class="admin-sheets-header">
+                <span class="admin-sheets-title">Mis Hojas de Google Sheets</span>
+                <span class="admin-sheets-badge" id="admin-sheets-count-badge">1 hoja</span>
+              </div>
+
+              <div class="admin-sheets-list" id="admin-sheets-list" role="list"></div>
+
+              <div class="admin-create-sheet-box">
+                <h3 class="admin-create-sheet-title">➕ Crear nueva hoja de Google Sheets en 1 clic</h3>
+                <p class="admin-create-sheet-desc">
+                  Crea un nuevo archivo en tu Google Drive ya vinculado a este mismo conector y genera su código QR al instante (ideal para cambiar de año o abrir otra sucursal).
+                </p>
+
+                <div class="alert" id="admin-create-sheet-status" role="status" aria-live="polite" hidden></div>
+
+                <form id="form-admin-create-sheet" novalidate>
+                  <div class="field" style="margin-bottom: 0.7rem;">
+                    <label class="field-label" for="new-sheet-org-name">Nombre del nuevo Google Sheets</label>
+                    <input
+                      type="text"
+                      id="new-sheet-org-name"
+                      class="input-text"
+                      placeholder="Ej. Asistencia Limpieza 2027"
+                      maxlength="60"
+                      required
+                    >
+                  </div>
+
+                  <label class="admin-checkbox-row" for="new-sheet-copy-workers">
+                    <input
+                      type="checkbox"
+                      id="new-sheet-copy-workers"
+                      class="admin-checkbox-input"
+                    >
+                    <span class="admin-checkbox-copy">
+                      <strong>Copiar la pestaña "Trabajadores" de la hoja actual</strong>
+                      <span>Conserva los IDs de 8 dígitos, nombres congelados e historial de celulares en la nueva hoja para que tu equipo no tenga que registrarse de cero.</span>
+                    </span>
+                  </label>
+
+                  <button type="submit" class="btn btn-primary btn-block" id="btn-create-new-sheet">
+                    ➕ Crear nuevo Google Sheets y generar QR
+                  </button>
+                </form>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -554,6 +617,16 @@
 
             <!-- Controls (hidden on @media print) -->
             <div class="admin-actions-stack no-print">
+              <a
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn btn-secondary btn-sm btn-block"
+                id="btn-open-active-sheet"
+                hidden
+              >
+                📊 Abrir esta hoja en Google Sheets
+              </a>
               <div class="field" style="margin-bottom: 0;">
                 <label class="field-label" for="admin-magic-link">Magic Link de invitación</label>
                 <input

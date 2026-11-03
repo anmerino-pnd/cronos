@@ -32,7 +32,7 @@ const state = {
   quickSwitchMode: false, // true when active worker taps "Cambiar QR / Hoja" keeping their session & ID
   registerAuthTab: 'new', // 'new' | 'id'
   pendingNewWorkerId: '', // 8-digit ID pre-generated for "Soy nuevo"
-  pendingCompany: null, // { scriptId, orgName, isSessionSwitch: boolean }
+  pendingCompany: null, // { scriptId, orgName, sheetId, isSessionSwitch: boolean }
   lastAttemptedPunchType: null, // 'ENTRADA' | 'SALIDA'
   pendingRepeatType: null,
   unlinkConfirmArmed: false,
@@ -42,7 +42,9 @@ const state = {
   qrScannerRunning: false,
   html5QrScriptPromise: null,
   adminModulesPromise: null,
-  activeAdminAccess: null, // { scriptId, orgName, token, magicLink }
+  activeAdminAccess: null, // { scriptId, orgName, sheetId, sheetUrl, token, magicLink }
+  adminSheetsCatalog: [], // [{ sheetId, orgName, sheetUrl, createdAt, isPrimary }]
+  adminPin: '',
   deviceId: '' // Persistent phone identifier (CEL-XXXXXXXX)
 };
 
@@ -82,9 +84,12 @@ function cacheElements() {
     // View 4: Admin
     'view-admin', 'admin-setup-guide', 'btn-copy-gas', 'gas-code-preview',
     'admin-grid', 'admin-form-card', 'admin-form-error', 'form-admin-generate',
-    'admin-org-name', 'admin-script-url', 'btn-generate-access',
+    'admin-org-name', 'admin-script-url', 'admin-pin', 'btn-generate-access',
+    'admin-sheets-panel', 'admin-sheets-count-badge', 'admin-sheets-list',
+    'admin-create-sheet-status', 'form-admin-create-sheet', 'new-sheet-org-name',
+    'new-sheet-copy-workers', 'btn-create-new-sheet',
     'admin-output-card', 'poster-org-title', 'admin-qr-canvas',
-    'admin-magic-link', 'btn-copy-magic-link', 'btn-share-whatsapp',
+    'btn-open-active-sheet', 'admin-magic-link', 'btn-copy-magic-link', 'btn-share-whatsapp',
     'btn-download-qr', 'btn-print-qr', 'btn-test-connection', 'test-connection-result',
     // Modals & Toast
     'modal-success', 'success-banner', 'success-stamp', 'success-time-big',
@@ -285,6 +290,7 @@ function loadConfig() {
       parsed.workerName.trim() &&
       parsed.privacyAccepted === true
     ) {
+      parsed.sheetId = typeof parsed.sheetId === 'string' ? parsed.sheetId.trim() : '';
       // Auto-assign an 8-digit workerId if migrating from an older localStorage config
       if (!normalizeWorkerId8(parsed.workerId)) {
         parsed.workerId = generateRandomWorkerId8();
@@ -297,6 +303,15 @@ function loadConfig() {
   } catch {
     return null;
   }
+}
+
+function isSameSheetTarget(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.scriptId === b.scriptId &&
+    (a.sheetId || '') === (b.sheetId || '') &&
+    a.orgName === b.orgName
+  );
 }
 
 function saveConfig(config) {
@@ -491,8 +506,17 @@ function routeFromCurrentState() {
   if (joinToken) {
     const decoded = decodeInviteInput(joinToken);
     if (decoded.ok) {
-      // If already configured for this exact company, clean URL and open daily checador
-      if (existingConfig && existingConfig.scriptId === decoded.scriptId) {
+      if (state.quickSwitchMode && existingConfig) {
+        applyDecodedInvite({
+          scriptId: decoded.scriptId,
+          orgName: decoded.orgName,
+          sheetId: decoded.sheetId || ''
+        });
+        return;
+      }
+
+      // If already configured for this exact company & sheet, clean URL and open daily checador
+      if (existingConfig && isSameSheetTarget(existingConfig, decoded)) {
         cleanJoinQueryFromUrl();
         showToast(`Empresa activa: ${existingConfig.orgName}`);
         switchView('checador');
@@ -502,6 +526,7 @@ function routeFromCurrentState() {
       openRegistrationForCompany({
         scriptId: decoded.scriptId,
         orgName: decoded.orgName,
+        sheetId: decoded.sheetId || '',
         isSessionSwitch: false
       });
       return;
@@ -552,14 +577,20 @@ function renderWelcomeView() {
  * (`state.quickSwitchMode`), switches the linked Google Sheet in 1 step while
  * preserving their saved `workerName`, 8-digit `workerId`, and privacy consent.
  */
-function applyDecodedInvite({ scriptId, orgName }) {
+function applyDecodedInvite({ scriptId, orgName, sheetId = '' }) {
   const existing = loadConfig();
+  const cleanSheetId = (sheetId || '').trim();
 
   if (state.quickSwitchMode && existing) {
-    const isSameSheet = existing.scriptId === scriptId;
+    const isSameSheet = isSameSheetTarget(existing, {
+      scriptId,
+      orgName,
+      sheetId: cleanSheetId
+    });
     const updatedConfig = {
       scriptId,
       orgName,
+      sheetId: cleanSheetId,
       workerId: existing.workerId,
       workerName: existing.workerName,
       privacyAccepted: true,
@@ -579,6 +610,7 @@ function applyDecodedInvite({ scriptId, orgName }) {
   openRegistrationForCompany({
     scriptId,
     orgName,
+    sheetId: cleanSheetId,
     isSessionSwitch: false
   });
 }
@@ -656,7 +688,8 @@ async function startQrScanner() {
       await stopQrScanner();
       applyDecodedInvite({
         scriptId: parsed.scriptId,
-        orgName: parsed.orgName
+        orgName: parsed.orgName,
+        sheetId: parsed.sheetId || ''
       });
     };
 
@@ -727,7 +760,8 @@ async function handleQrImageUpload(event) {
 
     applyDecodedInvite({
       scriptId: parsed.scriptId,
-      orgName: parsed.orgName
+      orgName: parsed.orgName,
+      sheetId: parsed.sheetId || ''
     });
   } catch {
     showWelcomeError('No se detectó un código QR legible en la imagen seleccionada.');
@@ -759,9 +793,10 @@ function setRegisterAuthTab(mode) {
     : 'Iniciar sesión con mi ID';
 }
 
-function openRegistrationForCompany({ scriptId, orgName, isSessionSwitch = false }) {
+function openRegistrationForCompany({ scriptId, orgName, sheetId = '', isSessionSwitch = false }) {
   const existing = loadConfig();
-  state.pendingCompany = { scriptId, orgName, isSessionSwitch };
+  const cleanSheetId = (sheetId || '').trim();
+  state.pendingCompany = { scriptId, orgName, sheetId: cleanSheetId, isSessionSwitch };
   state.pendingNewWorkerId = generateRandomWorkerId8();
 
   el['register-error'].hidden = true;
@@ -775,7 +810,7 @@ function openRegistrationForCompany({ scriptId, orgName, isSessionSwitch = false
     : 'Te estás uniendo a:';
   el['register-org-name'].textContent = orgName;
 
-  if (!isSessionSwitch && existing && existing.scriptId !== scriptId) {
+  if (!isSessionSwitch && existing && !isSameSheetTarget(existing, { scriptId, orgName, sheetId: cleanSheetId })) {
     el['register-switch-notice'].textContent =
       `Este dispositivo estaba vinculado a "${existing.orgName}". Al guardar quedarás vinculado a "${orgName}".`;
     el['register-switch-notice'].hidden = false;
@@ -844,6 +879,7 @@ async function handleSaveWorkerRegistration(event) {
     completeWorkerSessionLogin({
       scriptId: state.pendingCompany.scriptId,
       orgName: state.pendingCompany.orgName,
+      sheetId: state.pendingCompany.sheetId || '',
       workerId,
       workerName,
       toastMsg: `Perfil guardado correctamente · ID ${formatWorkerId8(workerId)}`
@@ -883,6 +919,7 @@ async function handleSaveWorkerRegistration(event) {
     completeWorkerSessionLogin({
       scriptId: state.pendingCompany.scriptId,
       orgName: state.pendingCompany.orgName,
+      sheetId: state.pendingCompany.sheetId || '',
       workerId: digits8,
       workerName: boundName,
       toastMsg: `Sesión iniciada: ${boundName} (ID ${formatWorkerId8(digits8)})`
@@ -902,6 +939,7 @@ async function handleSaveWorkerRegistration(event) {
       state.pendingCompany.scriptId,
       {
         action: 'login_worker',
+        sheetId: state.pendingCompany.sheetId || '',
         workerId: digits8,
         deviceId: device.deviceId,
         deviceLabel: device.deviceLabel
@@ -913,6 +951,7 @@ async function handleSaveWorkerRegistration(event) {
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
         orgName: state.pendingCompany.orgName,
+        sheetId: state.pendingCompany.sheetId || '',
         workerId: normalizeWorkerId8(res.workerId) || digits8,
         workerName: res.workerName,
         toastMsg: `Sesión activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
@@ -926,6 +965,7 @@ async function handleSaveWorkerRegistration(event) {
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
         orgName: state.pendingCompany.orgName,
+        sheetId: state.pendingCompany.sheetId || '',
         workerId: digits8,
         workerName: cachedName,
         toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
@@ -945,6 +985,7 @@ async function handleSaveWorkerRegistration(event) {
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
         orgName: state.pendingCompany.orgName,
+        sheetId: state.pendingCompany.sheetId || '',
         workerId: digits8,
         workerName: cachedName,
         toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
@@ -961,17 +1002,19 @@ async function handleSaveWorkerRegistration(event) {
   }
 }
 
-function completeWorkerSessionLogin({ scriptId, orgName, workerId, workerName, toastMsg }) {
+function completeWorkerSessionLogin({ scriptId, orgName, sheetId = '', workerId, workerName, toastMsg }) {
   const prev = loadConfig();
+  const cleanSheetId = (sheetId || '').trim();
   const isDifferentWorkerOrOrg =
     !prev ||
-    prev.scriptId !== scriptId ||
+    !isSameSheetTarget(prev, { scriptId, orgName, sheetId: cleanSheetId }) ||
     prev.workerId !== workerId ||
     prev.workerName.toLowerCase() !== workerName.toLowerCase();
 
   const newConfig = {
     scriptId,
     orgName,
+    sheetId: cleanSheetId,
     workerId,
     workerName,
     privacyAccepted: true,
@@ -1296,6 +1339,7 @@ async function executePunch(type) {
 
   try {
     const result = await sendWebhookPost(config.scriptId, {
+      sheetId: config.sheetId || '',
       workerId: config.workerId,
       workerName: config.workerName,
       deviceId: device.deviceId,
@@ -1379,7 +1423,7 @@ function showSuccessReceiptModal({ type, workerName, workerId, orgName, localTim
 }
 
 /* ==========================================================================
-   View 4: Administrator Panel (/admin)
+   View 4: Administrator Panel (/admin) — Profile, Catalog & 1-Click Sheet Creator
    ========================================================================== */
 
 function loadAdminModules() {
@@ -1392,6 +1436,145 @@ function loadAdminModules() {
   return state.adminModulesPromise;
 }
 
+function getLocalAdminCatalogKey(scriptId) {
+  return `cronos_admin_catalog_${scriptId}`;
+}
+
+function loadLocalAdminCatalog(scriptId) {
+  if (!scriptId) return [];
+  try {
+    const raw = localStorage.getItem(getLocalAdminCatalogKey(scriptId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalAdminCatalog(scriptId, sheets) {
+  if (!scriptId || !Array.isArray(sheets)) return;
+  try {
+    localStorage.setItem(getLocalAdminCatalogKey(scriptId), JSON.stringify(sheets));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false } = {}) {
+  if (!state.activeAdminAccess || !sheetEntry) return;
+  const [qrMod] = await loadAdminModules();
+  const scriptId = state.activeAdminAccess.scriptId;
+  const orgName = (sheetEntry.orgName || state.activeAdminAccess.orgName || 'Empresa').trim();
+  // Primary sheet uses empty sid for compact backward-compatible QR unless it's a secondary sheet
+  const sheetId = sheetEntry.isPrimary ? '' : (sheetEntry.sheetId || '').trim();
+  const sheetUrl = (sheetEntry.sheetUrl || '').trim();
+
+  const token = encodeCompanyToken(scriptId, orgName, sheetId);
+  const magicLink = buildMagicLink(token);
+
+  state.activeAdminAccess = {
+    scriptId,
+    orgName,
+    sheetId,
+    rawSheetId: (sheetEntry.sheetId || '').trim(),
+    sheetUrl,
+    token,
+    magicLink
+  };
+
+  el['poster-org-title'].textContent = orgName;
+  el['admin-magic-link'].value = magicLink;
+
+  if (sheetUrl) {
+    el['btn-open-active-sheet'].href = sheetUrl;
+    el['btn-open-active-sheet'].hidden = false;
+  } else {
+    el['btn-open-active-sheet'].hidden = true;
+  }
+
+  el['admin-output-card'].hidden = false;
+  el['admin-grid'].classList.add('has-output');
+  el['admin-setup-guide'].open = false;
+
+  qrMod.renderQRToCanvas(el['admin-qr-canvas'], magicLink, {
+    size: 256,
+    quietZone: 4,
+    ecLevel: 'M'
+  });
+
+  renderAdminSheetsCatalog();
+
+  if (scrollToPoster) {
+    el['admin-output-card'].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function renderAdminSheetsCatalog() {
+  const listEl = el['admin-sheets-list'];
+  const panelEl = el['admin-sheets-panel'];
+  const badgeEl = el['admin-sheets-count-badge'];
+  if (!listEl || !panelEl) return;
+
+  const sheets = state.adminSheetsCatalog || [];
+  if (!state.activeAdminAccess || sheets.length === 0) {
+    panelEl.hidden = true;
+    return;
+  }
+
+  panelEl.hidden = false;
+  badgeEl.textContent = sheets.length === 1 ? '1 hoja' : `${sheets.length} hojas`;
+  listEl.innerHTML = '';
+
+  const activeOrg = state.activeAdminAccess.orgName;
+  const activeRawSid = state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId || '';
+
+  for (const item of sheets) {
+    const isCurrent =
+      (activeRawSid && item.sheetId === activeRawSid) ||
+      (!activeRawSid && item.orgName === activeOrg);
+
+    const row = document.createElement('div');
+    row.className = `admin-sheet-item${isCurrent ? ' is-active' : ''}`;
+    row.setAttribute('role', 'listitem');
+
+    const selectBtn = document.createElement('button');
+    selectBtn.type = 'button';
+    selectBtn.className = 'admin-sheet-select-btn';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'admin-sheet-name';
+    nameSpan.textContent = `${isCurrent ? '● ' : ''}${item.orgName}`;
+
+    const metaSpan = document.createElement('span');
+    metaSpan.className = 'admin-sheet-meta';
+    const roleTag = item.isPrimary ? 'Hoja principal' : 'Hoja adicional';
+    const dateTag = item.createdAt ? ` · ${item.createdAt}` : '';
+    metaSpan.textContent = `${roleTag}${dateTag} · Ver QR`;
+
+    selectBtn.appendChild(nameSpan);
+    selectBtn.appendChild(metaSpan);
+    selectBtn.addEventListener('click', () => {
+      setActiveAdminSheet(item, { scrollToPoster: false });
+      showToast(`QR activo: ${item.orgName}`);
+    });
+
+    row.appendChild(selectBtn);
+
+    if (item.sheetUrl) {
+      const openLink = document.createElement('a');
+      openLink.href = item.sheetUrl;
+      openLink.target = '_blank';
+      openLink.rel = 'noopener noreferrer';
+      openLink.className = 'admin-sheet-open-link';
+      openLink.textContent = '📊 Abrir Sheet';
+      row.appendChild(openLink);
+    }
+
+    listEl.appendChild(row);
+  }
+}
+
 async function initAdminPanel() {
   try {
     const [, gasMod] = await loadAdminModules();
@@ -1399,6 +1582,11 @@ async function initAdminPanel() {
   } catch {
     el['gas-code-preview'].textContent =
       '// Revisa el archivo backend/Code.gs o el README.md para copiar el código.';
+  }
+
+  // Ensure copyWorkers checkbox is always unchecked by default
+  if (el['new-sheet-copy-workers']) {
+    el['new-sheet-copy-workers'].checked = false;
   }
 
   if (!el['admin-org-name'].value && !el['admin-script-url'].value) {
@@ -1418,9 +1606,13 @@ async function handleAdminGenerate(event) {
   event.preventDefault();
   el['admin-form-error'].hidden = true;
   el['test-connection-result'].hidden = true;
+  if (el['admin-create-sheet-status']) {
+    el['admin-create-sheet-status'].hidden = true;
+  }
 
   const orgName = (el['admin-org-name'].value || '').trim().replace(/\s+/g, ' ');
   const rawUrl = (el['admin-script-url'].value || '').trim();
+  const adminPin = (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : '').trim();
 
   if (orgName.length < 2) {
     el['admin-form-error'].textContent = 'Escribe el nombre de la empresa (ej. Limpieza Sonora).';
@@ -1438,15 +1630,27 @@ async function handleAdminGenerate(event) {
   }
 
   try {
-    const [qrMod] = await loadAdminModules();
-    const token = encodeCompanyToken(parsedUrl.scriptId, orgName);
-    const magicLink = buildMagicLink(token);
+    await loadAdminModules();
+    state.adminPin = adminPin;
 
+    const cachedCatalog = loadLocalAdminCatalog(parsedUrl.scriptId);
+    const fallbackPrimary = {
+      sheetId: '',
+      orgName,
+      sheetUrl: '',
+      createdAt: '',
+      isPrimary: true
+    };
+
+    state.adminSheetsCatalog = cachedCatalog.length > 0 ? cachedCatalog : [fallbackPrimary];
     state.activeAdminAccess = {
       scriptId: parsedUrl.scriptId,
       orgName,
-      token,
-      magicLink
+      sheetId: '',
+      rawSheetId: '',
+      sheetUrl: '',
+      token: '',
+      magicLink: ''
     };
 
     try {
@@ -1458,25 +1662,112 @@ async function handleAdminGenerate(event) {
       // Ignore storage quota errors
     }
 
-    el['poster-org-title'].textContent = orgName;
-    el['admin-magic-link'].value = magicLink;
+    await setActiveAdminSheet(state.adminSheetsCatalog[0], { scrollToPoster: true });
+    showToast('Código QR y perfil de administrador listos');
 
-    el['admin-output-card'].hidden = false;
-    el['admin-grid'].classList.add('has-output');
-    el['admin-setup-guide'].open = false;
-
-    qrMod.renderQRToCanvas(el['admin-qr-canvas'], magicLink, {
-      size: 256,
-      quietZone: 4,
-      ecLevel: 'M'
-    });
-
-    showToast('Código QR y enlace generados');
-    el['admin-output-card'].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Sync Admin Profile & Sheets Catalog with Google Apps Script in background
+    try {
+      const authRes = await sendWebhookPost(parsedUrl.scriptId, {
+        action: 'admin_auth',
+        orgName,
+        adminPin
+      });
+      if (authRes && authRes.status === 'ok' && Array.isArray(authRes.sheets) && authRes.sheets.length > 0) {
+        state.adminSheetsCatalog = authRes.sheets;
+        saveLocalAdminCatalog(parsedUrl.scriptId, authRes.sheets);
+        await setActiveAdminSheet(authRes.sheets[0], { scrollToPoster: false });
+      }
+    } catch (syncErr) {
+      // If PIN was incorrect, surface it clearly to the admin
+      if (syncErr && /PIN/i.test(String(syncErr.message || ''))) {
+        el['admin-form-error'].textContent = syncErr.message;
+        el['admin-form-error'].hidden = false;
+      }
+    }
   } catch (err) {
     el['admin-form-error'].textContent =
       (err && err.message) || 'Ocurrió un error al generar el código QR.';
     el['admin-form-error'].hidden = false;
+  }
+}
+
+async function handleAdminCreateSheet(event) {
+  event.preventDefault();
+  if (!state.activeAdminAccess) return;
+
+  const statusBox = el['admin-create-sheet-status'];
+  statusBox.hidden = true;
+
+  const newOrgName = (el['new-sheet-org-name'].value || '').trim().replace(/\s+/g, ' ');
+  const copyWorkers = el['new-sheet-copy-workers'].checked === true;
+  const adminPin = (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : state.adminPin || '').trim();
+
+  if (newOrgName.length < 2) {
+    statusBox.className = 'alert alert-error';
+    statusBox.textContent = 'Escribe el nombre para la nueva hoja de Google Sheets (ej. Asistencia Limpieza 2027).';
+    statusBox.hidden = false;
+    el['new-sheet-org-name'].focus();
+    return;
+  }
+
+  const btn = el['btn-create-new-sheet'];
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Creando Google Sheets en tu Drive…';
+
+  statusBox.className = 'alert alert-amber';
+  statusBox.textContent = 'Creando archivo en Google Drive y configurando pestañas…';
+  statusBox.hidden = false;
+
+  try {
+    const sourceSheetId = state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId || '';
+    const result = await sendWebhookPost(state.activeAdminAccess.scriptId, {
+      action: 'admin_create_sheet',
+      newOrgName,
+      copyWorkers,
+      sourceSheetId,
+      adminPin
+    });
+
+    if (Array.isArray(result.sheets) && result.sheets.length > 0) {
+      state.adminSheetsCatalog = result.sheets;
+      saveLocalAdminCatalog(state.activeAdminAccess.scriptId, result.sheets);
+    } else if (result.createdSheet) {
+      state.adminSheetsCatalog.push(result.createdSheet);
+      saveLocalAdminCatalog(state.activeAdminAccess.scriptId, state.adminSheetsCatalog);
+    }
+
+    const createdEntry = result.createdSheet || {
+      sheetId: result.sheetId,
+      orgName: newOrgName,
+      sheetUrl: result.sheetUrl || '',
+      createdAt: '',
+      isPrimary: false
+    };
+
+    await setActiveAdminSheet(createdEntry, { scrollToPoster: true });
+
+    // Reset form fields and keep copyWorkers unchecked by default
+    el['new-sheet-org-name'].value = '';
+    el['new-sheet-copy-workers'].checked = false;
+
+    const workersNote = copyWorkers
+      ? ` Se copiaron ${result.copiedWorkersCount || 0} trabajador(es) con sus IDs y celulares.`
+      : ' Se creó con la pestaña Trabajadores limpia.';
+
+    statusBox.className = 'alert alert-success';
+    statusBox.textContent = `¡Hoja "${newOrgName}" creada en tu Google Drive!${workersNote} El código QR y Magic Link de la derecha ya apuntan a esta nueva hoja.`;
+    statusBox.hidden = false;
+
+    showToast(`Nueva hoja creada: ${newOrgName}`, 3400);
+  } catch (err) {
+    statusBox.className = 'alert alert-error';
+    statusBox.textContent =
+      (err && err.message) || 'No se pudo crear la nueva hoja. Verifica que tu script tenga el código actualizado.';
+    statusBox.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
@@ -1495,6 +1786,7 @@ async function handleAdminTestConnection() {
 
   try {
     const result = await sendWebhookPost(state.activeAdminAccess.scriptId, {
+      sheetId: state.activeAdminAccess.sheetId || '',
       workerName: 'Prueba de Conexión (Cronos)',
       type: 'PRUEBA',
       lat: 29.072967,
@@ -1730,7 +2022,8 @@ function bindEvents() {
     el['input-invite-code'].value = '';
     applyDecodedInvite({
       scriptId: decoded.scriptId,
-      orgName: decoded.orgName
+      orgName: decoded.orgName,
+      sheetId: decoded.sheetId || ''
     });
   });
 
@@ -1824,6 +2117,7 @@ function bindEvents() {
   });
 
   el['form-admin-generate'].addEventListener('submit', handleAdminGenerate);
+  el['form-admin-create-sheet'].addEventListener('submit', handleAdminCreateSheet);
 
   el['btn-copy-magic-link'].addEventListener('click', async () => {
     if (!state.activeAdminAccess) return;
@@ -1904,6 +2198,7 @@ function bindEvents() {
     openRegistrationForCompany({
       scriptId: config.scriptId,
       orgName: config.orgName,
+      sheetId: config.sheetId || '',
       isSessionSwitch: true
     });
   });

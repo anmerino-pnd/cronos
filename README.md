@@ -35,10 +35,13 @@ También puedes seguir esta misma guía interactiva directamente desde el **Pane
    * Haz clic abajo a la izquierda en **Avanzado** (o **Configuración avanzada**).
    * Haz clic abajo en **Ir a Cronos - Conector de Asistencia (unsafe)** / **(no seguro)**.
    * Presiona **Continuar** (o **Permitir**).
-5. **Vincular con Cronos:**
+5. **Vincular con Cronos y activar tu Perfil de Administrador:**
    * Copia la **URL de la aplicación web** que termina en `/exec`.
-   * Abre Cronos en modo Administrador (`/#admin` o `/admin`), escribe el nombre de tu empresa, pega la URL y presiona **Generar Acceso**.
+   * Abre Cronos en modo Administrador (`/#admin` o `/admin`), escribe el nombre de tu empresa/hoja, pega la URL, define un **PIN de Admin** (opcional) y presiona **Generar Acceso y Conectar Perfil**.
    * Presiona **Probar conexión** para verificar que se inserte una fila de prueba en tu hoja, e imprime el **Cartel QR** o comparte el **Magic Link por WhatsApp** con tu equipo.
+6. **Crear nuevas hojas de Google Sheets en 1 clic (sin volver a tocar Apps Script):**
+   * Una vez configurado tu conector por primera vez, desde la sección **Mis Hojas de Google Sheets** en `/admin` puedes escribir el nombre de un nuevo archivo (ej. *Asistencia Limpieza 2027*), elegir opcionalmente si deseas **copiar la pestaña `Trabajadores` de la hoja actual** (desmarcado por defecto, para que tú decidas si conservar los IDs de 8 dígitos, nombres congelados e historial de celulares) y presionar **`➕ Crear nuevo Google Sheets y generar QR`**.
+   * El conector creará el nuevo archivo directamente en tu Google Drive con su pestaña mensual y directorio listos, y generará su nuevo código QR y enlace de invitación al instante.
 
 ### Pestañas Mensuales, Diseño Automático y Sello Criptográfico (`backend/Code.gs`)
 
@@ -46,10 +49,10 @@ El código completo del conector se encuentra en [`backend/Code.gs`](./backend/C
 
 * **Privacidad de la hoja:** Tu archivo de Google Sheets permanece **100% privado** en tu Google Drive; `"Cualquier usuario"` únicamente habilita el envío al webhook `doPost`, sin dar permiso de lectura ni escritura directa sobre el archivo.
 * **Organización automática por mes:** Cada registro se guarda en la pestaña del mes correspondiente según la hora oficial y zona horaria del Sheets (ej. `Octubre 2026`, `Noviembre 2026`...). Al iniciar un nuevo mes, en la primera marca recibida a partir del día 1 a las `00:00:00`, el script crea automáticamente la pestaña del nuevo mes y la coloca **al inicio (primera a la izquierda)** con pestaña en verde esmeralda (atenuando los meses anteriores a gris pizarra).
-* **Directorio automático `Trabajadores` (ID de 8 dígitos + Nombre Congelado + Serie de Celular):**
+* **Directorio automático `Trabajadores` (ID de 8 dígitos + Nombre Congelado + Serie de Celular con índice fijo):**
   * Al registrarse por primera vez, a cada trabajador se le asigna un **ID único numérico de 8 dígitos** (ej. `4829-1034`) y su nombre completo queda **congelado** en la pestaña `Trabajadores` para evitar variaciones o errores de escritura.
-  * El sistema registra el identificador único del celular titular de cada empleado (`CEL-XXXXXXXX`) y mantiene una columna tipo lista con todos los dispositivos únicos que han usado su ID.
-  * Si un trabajador inicia sesión con su ID de 8 dígitos en el celular de un compañero (ej. porque se le descargó su teléfono o pidió que checaran por él), el registro **no se bloquea**, pero la columna **`Dispositivo / Auditoría`** señala claramente en rojo/ámbar de quién es el celular utilizado (`🚨 Celular de Juan Pérez`) o si es un equipo adicional (`⚠️ Celular adicional #2`).
+  * El sistema registra el identificador único del celular titular de cada empleado (`CEL-XXXXXXXX`) y mantiene una columna tipo lista numerada (`1)`, `2)`, `3)`...) con todos los dispositivos únicos que han usado su ID.
+  * Si un trabajador inicia sesión con su ID de 8 dígitos en el celular de un compañero (ej. porque se le descargó su teléfono o pidió que checaran por él), el registro **no se bloquea**, pero la columna **`Dispositivo / Auditoría`** señala claramente en rojo/ámbar de quién es el celular utilizado (`🚨 Celular de Juan Pérez`) o el número fijo del equipo adicional (`⚠️ Celular adicional #2`, `⚠️ Celular adicional #3`, conservando siempre el número asignado a cada dispositivo en la lista).
 * **Diseño visual automático:** Encabezado oscuro congelado (`42 px`), filtros activos, anchos de columna holgados, filas de `34 px` con bandas alternadas, etiquetas de color automáticas (`ENTRADA` en verde, `SALIDA` en azul, `PRUEBA` en ámbar), precisión formateada en metros (`15 m`) y enlace limpio **`📍 Abrir en Maps`**.
 * **Sello Criptográfico Encadenado por Mes (`HMAC-SHA256`):** Cada fila se firma en el servidor con una llave secreta privada guardada en `PropertiesService` (invisible desde la hoja), incluyendo año-mes, folio consecutivo, ID del trabajador, auditoría de dispositivo y el sello de la fila anterior (`🔒 CRN-202611-0001-...`).
   * **Detección inmediata (`onEdit`):** Si alguien con acceso al archivo edita manualmente cualquier celda o mueve filas entre meses, el sello se marca en **rojo** al instante con una alerta.

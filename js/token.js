@@ -74,14 +74,16 @@ export function buildWebhookUrl(scriptId) {
 }
 
 /**
- * Encodes `{ id, org }` into a compact URL-safe Base64 token (UTF-8 compatible).
+ * Encodes `{ id, org, sid? }` into a compact URL-safe Base64 token (UTF-8 compatible).
  * @param {string} scriptId
  * @param {string} orgName
+ * @param {string} [sheetId]
  * @returns {string}
  */
-export function encodeCompanyToken(scriptId, orgName) {
+export function encodeCompanyToken(scriptId, orgName, sheetId = '') {
   const cleanId = (scriptId || '').trim();
   const cleanOrg = (orgName || '').trim();
+  const cleanSheetId = (sheetId || '').trim();
   if (!SCRIPT_ID_PATTERN.test(cleanId)) {
     throw new Error('Identificador de script inválido.');
   }
@@ -89,7 +91,12 @@ export function encodeCompanyToken(scriptId, orgName) {
     throw new Error('El nombre de la empresa es obligatorio.');
   }
 
-  const json = JSON.stringify({ id: cleanId, org: cleanOrg });
+  const payload = { id: cleanId, org: cleanOrg };
+  if (cleanSheetId) {
+    payload.sid = cleanSheetId;
+  }
+
+  const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
@@ -106,7 +113,7 @@ export function encodeCompanyToken(scriptId, orgName) {
  * a full Magic Link URL (`?join=...`), or a pasted WhatsApp message containing the link.
  *
  * @param {string} rawInput
- * @returns {{ ok: true, scriptId: string, orgName: string, token: string } | { ok: false, error: string }}
+ * @returns {{ ok: true, scriptId: string, orgName: string, sheetId: string, token: string } | { ok: false, error: string }}
  */
 export function decodeInviteInput(rawInput) {
   const text = (rawInput || '').trim();
@@ -190,6 +197,7 @@ export function decodeInviteInput(rawInput) {
 
     const scriptId = payload.id.trim();
     const orgName = payload.org.trim();
+    const sheetId = typeof payload.sid === 'string' ? payload.sid.trim() : '';
 
     if (!SCRIPT_ID_PATTERN.test(scriptId) || !orgName) {
       return {
@@ -202,7 +210,8 @@ export function decodeInviteInput(rawInput) {
       ok: true,
       scriptId,
       orgName,
-      token: encodeCompanyToken(scriptId, orgName)
+      sheetId,
+      token: encodeCompanyToken(scriptId, orgName, sheetId)
     };
   } catch {
     return {

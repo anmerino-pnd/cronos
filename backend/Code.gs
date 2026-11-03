@@ -4,7 +4,9 @@
  * - Creación automática de pestaña por mes ("Octubre 2026", "Noviembre 2026"...)
  *   colocando siempre el mes en curso como primera pestaña a la izquierda
  * - Pestaña automática "Trabajadores" con ID numérico de 8 dígitos, nombre
- *   congelado (sin variaciones) e historial auditable de celulares por empleado
+ *   congelado (sin variaciones) e historial numerado de celulares por empleado
+ * - Perfil de Administrador con creación de nuevos archivos de Google Sheets en
+ *   1 clic (con opción de migrar la tabla de Trabajadores al nuevo archivo)
  * - Diseño ejecutivo automático desde el primer registro (columnas, colores, links)
  * - Sello criptográfico encadenado por mes (HMAC-SHA256) contra ediciones manuales
  * - Detección en tiempo real (onEdit) y auditoría por hoja o global desde menú "Cronos"
@@ -81,16 +83,19 @@ function onOpen() {
 }
 
 /**
- * Webhook principal que recibe registros de asistencia, altas e inicios de sesión por ID.
+ * Webhook principal que recibe registros de asistencia, inicios de sesión por ID
+ * y comandos del Perfil de Administrador (creación de nuevas hojas en 1 clic).
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(12000);
+  lock.waitLock(15000);
 
   try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     const data = JSON.parse(e.postData.contents);
     const action = String(data.action || "checkin").trim().toLowerCase();
+
+    // Resolver el archivo de Google Sheets destino (soporta múltiples hojas por Admin)
+    const spreadsheet = resolverSpreadsheetObjetivo_(data);
 
     // Hora oficial generada en los servidores de Google (inmune al reloj del celular)
     const now = new Date();
@@ -98,7 +103,25 @@ function doPost(e) {
     const sheetTimeZone = spreadsheet.getSpreadsheetTimeZone();
     const localTime = Utilities.formatDate(now, sheetTimeZone, "yyyy-MM-dd HH:mm:ss");
 
-    // 1. Flujo de inicio de sesión por ID numérico de 8 dígitos ("Cambiar sesión")
+    // 1. Flujo de Perfil de Administrador: Autenticación y listado de hojas
+    if (action === "admin_auth") {
+      const authRes = gestionarAutenticacionAdmin_(data, localTime);
+      authRes.localTime = localTime;
+      authRes.timeZone = sheetTimeZone;
+      return ContentService.createTextOutput(JSON.stringify(authRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 2. Flujo de Perfil de Administrador: Crear nuevo archivo de Google Sheets en 1 clic
+    if (action === "admin_create_sheet") {
+      const createRes = crearNuevaHojaDesdeAdmin_(data, localTime);
+      createRes.localTime = localTime;
+      createRes.timeZone = sheetTimeZone;
+      return ContentService.createTextOutput(JSON.stringify(createRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 3. Flujo de inicio de sesión por ID numérico de 8 dígitos ("Cambiar sesión")
     if (action === "login_worker") {
       const loginRes = iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime);
       loginRes.localTime = localTime;
@@ -108,7 +131,7 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 2. Flujo de alta / sincronización de trabajador en la pestaña "Trabajadores"
+    // 4. Flujo de alta / sincronización de trabajador en la pestaña "Trabajadores"
     if (action === "register_worker") {
       const regRes = sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, "ALTA");
       return ContentService.createTextOutput(JSON.stringify({
@@ -125,13 +148,13 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 3. Flujo de registro de asistencia (ENTRADA / SALIDA / PRUEBA)
+    // 5. Flujo de registro de asistencia (ENTRADA / SALIDA / PRUEBA)
     const infoMes = resolverInfoMesDesdeFechaLocal_(localTime);
     const sheet = obtenerHojaMensualCronos_(spreadsheet, infoMes.nombreHoja);
 
     const secret = obtenerSecretoHmac_();
     const props = PropertiesService.getScriptProperties();
-    const headKey = "CRONOS_CHAIN_HEAD_" + sheet.getSheetId();
+    const headKey = obtenerClaveCabezaCadena_(spreadsheet, sheet);
 
     const type = String(data.type || "REGISTRO").trim().toUpperCase();
     const accuracy = Math.round(Number(data.accuracy) || 0);
@@ -231,6 +254,7 @@ function doPost(e) {
       utcTime: utcTime,
       timeZone: sheetTimeZone,
       sheetName: infoMes.nombreHoja,
+      sheetId: obtenerIdSpreadsheetSeguro_(spreadsheet),
       workerId: workerId,
       formattedWorkerId: formattedWorkerId,
       workerName: workerName,
@@ -247,6 +271,289 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Resuelve el archivo Spreadsheet objetivo: si el payload especifica `sheetId`
+ * (para hojas adicionales creadas desde el perfil de Admin), lo abre por ID;
+ * de lo contrario usa el archivo contenedor principal.
+ */
+function resolverSpreadsheetObjetivo_(data) {
+  const sid = String((data && data.sheetId) || "").trim();
+  if (sid) {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active && obtenerIdSpreadsheetSeguro_(active) === sid) {
+      return active;
+    }
+    return SpreadsheetApp.openById(sid);
+  }
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function obtenerIdSpreadsheetSeguro_(spreadsheet) {
+  try {
+    return typeof spreadsheet.getId === "function" ? String(spreadsheet.getId() || "") : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function obtenerUrlSpreadsheetSeguro_(spreadsheet) {
+  try {
+    if (typeof spreadsheet.getUrl === "function") return String(spreadsheet.getUrl() || "");
+    const id = obtenerIdSpreadsheetSeguro_(spreadsheet);
+    return id ? ("https://docs.google.com/spreadsheets/d/" + id + "/edit") : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function obtenerNombreSpreadsheetSeguro_(spreadsheet) {
+  try {
+    return typeof spreadsheet.getName === "function" ? String(spreadsheet.getName() || "Asistencia Cronos") : "Asistencia Cronos";
+  } catch (_) {
+    return "Asistencia Cronos";
+  }
+}
+
+function obtenerClaveCabezaCadena_(spreadsheet, sheet) {
+  const props = PropertiesService.getScriptProperties();
+  const ssId = obtenerIdSpreadsheetSeguro_(spreadsheet);
+  const scopedKey = ssId ? ("CRONOS_CHAIN_HEAD_" + ssId + "_" + sheet.getSheetId()) : ("CRONOS_CHAIN_HEAD_" + sheet.getSheetId());
+  const legacyKey = "CRONOS_CHAIN_HEAD_" + sheet.getSheetId();
+  if (!props.getProperty(scopedKey) && props.getProperty(legacyKey)) {
+    return legacyKey;
+  }
+  return scopedKey;
+}
+
+/* ============================================================================
+   Perfil de Administrador: Autenticación y Creación de Nuevas Hojas en 1 Clic
+   ============================================================================ */
+
+function calcularHashPinAdmin_(rawPin, secret) {
+  const cleanPin = String(rawPin || "").trim();
+  const sigBytes = Utilities.computeHmacSha256Signature(
+    "CRONOS_ADMIN_PIN|" + cleanPin,
+    secret,
+    Utilities.Charset.UTF_8
+  );
+  return sigBytes
+    .map(function (b) {
+      const v = b < 0 ? b + 256 : b;
+      return (v < 16 ? "0" : "") + v.toString(16);
+    })
+    .join("");
+}
+
+function obtenerCatalogoHojasAdmin_(defaultOrgName, localTime) {
+  const props = PropertiesService.getScriptProperties();
+  const primarySs = SpreadsheetApp.getActiveSpreadsheet();
+  const primaryId = obtenerIdSpreadsheetSeguro_(primarySs);
+  const primaryUrl = obtenerUrlSpreadsheetSeguro_(primarySs);
+  const primaryTitle = obtenerNombreSpreadsheetSeguro_(primarySs);
+
+  let list = [];
+  try {
+    const raw = props.getProperty("CRONOS_ADMIN_SHEETS");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) list = parsed;
+    }
+  } catch (_) {
+    list = [];
+  }
+
+  // Asegurar que la hoja principal siempre esté registrada en la posición 0
+  const hasPrimary = list.some(function (item) {
+    return item && (item.isPrimary === true || (primaryId && item.sheetId === primaryId));
+  });
+
+  if (!hasPrimary) {
+    list.unshift({
+      sheetId: primaryId,
+      orgName: String(defaultOrgName || primaryTitle || "Hoja Principal").trim(),
+      sheetTitle: primaryTitle,
+      sheetUrl: primaryUrl,
+      isPrimary: true,
+      workersCopied: 0,
+      createdAt: localTime
+    });
+    props.setProperty("CRONOS_ADMIN_SHEETS", JSON.stringify(list));
+  } else if (defaultOrgName && list[0] && list[0].isPrimary) {
+    list[0].orgName = String(defaultOrgName).trim();
+    if (primaryUrl) list[0].sheetUrl = primaryUrl;
+    if (primaryId) list[0].sheetId = primaryId;
+    props.setProperty("CRONOS_ADMIN_SHEETS", JSON.stringify(list));
+  }
+
+  return list;
+}
+
+function gestionarAutenticacionAdmin_(data, localTime) {
+  const props = PropertiesService.getScriptProperties();
+  const secret = obtenerSecretoHmac_();
+  const inputPin = String(data.adminPin || "").trim();
+  const inputOrgName = String(data.orgName || "").trim();
+
+  let profile = null;
+  try {
+    const rawProfile = props.getProperty("CRONOS_ADMIN_PROFILE");
+    if (rawProfile) profile = JSON.parse(rawProfile);
+  } catch (_) {
+    profile = null;
+  }
+
+  // Si aún no existe perfil de Admin con PIN y enviaron un PIN nuevo -> registrarlo
+  if (!profile || !profile.pinHash) {
+    if (inputPin) {
+      if (inputPin.length < 4) {
+        return {
+          status: "error",
+          message: "El PIN o contraseña de administrador debe tener al menos 4 caracteres."
+        };
+      }
+      profile = {
+        pinHash: calcularHashPinAdmin_(inputPin, secret),
+        createdAt: localTime
+      };
+      props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
+    }
+    const sheets = obtenerCatalogoHojasAdmin_(inputOrgName, localTime);
+    return {
+      status: "ok",
+      action: "admin_auth",
+      mode: inputPin ? "profile_created" : "unlocked",
+      hasPin: !!(profile && profile.pinHash),
+      sheets: sheets
+    };
+  }
+
+  // Si ya tiene PIN configurado, validarlo
+  if (!inputPin || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
+    return {
+      status: "auth_error",
+      hasPin: true,
+      message: "PIN o contraseña de administrador incorrecta."
+    };
+  }
+
+  const sheets = obtenerCatalogoHojasAdmin_(inputOrgName, localTime);
+  return {
+    status: "ok",
+    action: "admin_auth",
+    mode: "logged_in",
+    hasPin: true,
+    sheets: sheets
+  };
+}
+
+/**
+ * Crea un nuevo archivo de Google Sheets en el Drive del administrador en 1 clic,
+ * inicializando la pestaña del mes actual y la pestaña "Trabajadores"
+ * (copiando opcionalmente los trabajadores de la hoja anterior si copyWorkers === true).
+ */
+function crearNuevaHojaDesdeAdmin_(data, localTime) {
+  const props = PropertiesService.getScriptProperties();
+  const secret = obtenerSecretoHmac_();
+  const inputPin = String(data.adminPin || "").trim();
+  const newOrgName = String(data.orgName || "").trim().replace(/\s+/g, " ");
+  const copyWorkers = data.copyWorkers === true;
+  const sourceSheetId = String(data.sourceSheetId || "").trim();
+
+  if (newOrgName.length < 2) {
+    return {
+      status: "error",
+      message: "Escribe el nombre para la nueva hoja de Google Sheets (ej. Asistencia Limpieza 2027)."
+    };
+  }
+
+  // Verificar PIN si el perfil de Admin tiene uno configurado
+  let profile = null;
+  try {
+    const rawProfile = props.getProperty("CRONOS_ADMIN_PROFILE");
+    if (rawProfile) profile = JSON.parse(rawProfile);
+  } catch (_) {}
+
+  if (profile && profile.pinHash) {
+    if (!inputPin || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
+      return {
+        status: "auth_error",
+        message: "PIN o contraseña de administrador incorrecta para crear una nueva hoja."
+      };
+    }
+  } else if (inputPin && inputPin.length >= 4) {
+    profile = {
+      pinHash: calcularHashPinAdmin_(inputPin, secret),
+      createdAt: localTime
+    };
+    props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
+  }
+
+  const primarySs = SpreadsheetApp.getActiveSpreadsheet();
+  const baseTimeZone = primarySs.getSpreadsheetTimeZone();
+
+  // 1. Crear el nuevo archivo de Google Sheets en Google Drive
+  const newSs = SpreadsheetApp.create(newOrgName);
+  try {
+    newSs.setSpreadsheetTimeZone(baseTimeZone);
+  } catch (_) {}
+
+  // 2. Inicializar la pestaña del mes actual (queda en posición 0) y la pestaña "Trabajadores"
+  const infoMes = resolverInfoMesDesdeFechaLocal_(localTime);
+  obtenerHojaMensualCronos_(newSs, infoMes.nombreHoja);
+  const newWorkersSheet = obtenerHojaTrabajadoresCronos_(newSs);
+
+  // 3. Si el administrador marcó la opción, copiar los trabajadores (IDs de 8 dígitos, nombres congelados y celulares)
+  let workersCopiedCount = 0;
+  if (copyWorkers) {
+    let sourceSs = primarySs;
+    if (sourceSheetId) {
+      try {
+        sourceSs = resolverSpreadsheetObjetivo_({ sheetId: sourceSheetId });
+      } catch (_) {
+        sourceSs = primarySs;
+      }
+    }
+    const sourceWorkersSheet = sourceSs.getSheetByName(CRONOS_WORKERS_SHEET_NAME);
+    if (sourceWorkersSheet && sourceWorkersSheet.getLastRow() >= 2) {
+      const numWorkers = sourceWorkersSheet.getLastRow() - 1;
+      const workerRows = sourceWorkersSheet.getRange(2, 1, numWorkers, 7).getValues();
+      if (workerRows.length > 0) {
+        const targetRange = newWorkersSheet.getRange(2, 1, workerRows.length, 7);
+        targetRange.setNumberFormat("@");
+        targetRange.setValues(workerRows);
+        for (let i = 0; i < workerRows.length; i++) {
+          const rIdx = i + 2;
+          const stText = String(workerRows[i][2] || "");
+          const lvl = stText.indexOf("🚨") !== -1 ? "shared" : (stText.indexOf("⚠️") !== -1 ? "secondary" : "primary");
+          estilizarFilaTrabajador_(newWorkersSheet, rIdx, lvl);
+        }
+        workersCopiedCount = workerRows.length;
+      }
+    }
+  }
+
+  // 4. Registrar la nueva hoja en el catálogo del Admin
+  const sheets = obtenerCatalogoHojasAdmin_("", localTime);
+  const newEntry = {
+    sheetId: obtenerIdSpreadsheetSeguro_(newSs),
+    orgName: newOrgName,
+    sheetTitle: newOrgName,
+    sheetUrl: obtenerUrlSpreadsheetSeguro_(newSs),
+    isPrimary: false,
+    workersCopied: workersCopiedCount,
+    createdAt: localTime
+  };
+  sheets.push(newEntry);
+  props.setProperty("CRONOS_ADMIN_SHEETS", JSON.stringify(sheets));
+
+  return {
+    status: "ok",
+    action: "admin_create_sheet",
+    newSheet: newEntry,
+    sheets: sheets
+  };
 }
 
 /**
@@ -626,7 +933,7 @@ function leerDirectorioTrabajadores_(workersSheet) {
 
 /**
  * Evalúa la relación entre el trabajador actual y el celular desde el que se conecta,
- * actualizando el historial de dispositivos en la fila del trabajador si es necesario.
+ * conservando el número de orden fijo de cada celular (#1 Titular, #2 Adicional #2, #3 Adicional #3...).
  */
 function evaluarYActualizarDispositivoTrabajador_(workersSheet, dir, record, deviceId, deviceLabel, localTime, eventTag) {
   const etiquetaEquipo = deviceLabel ? (deviceId + " (" + deviceLabel + ")") : deviceId;
@@ -639,31 +946,39 @@ function evaluarYActualizarDispositivoTrabajador_(workersSheet, dir, record, dev
     ? record.historyText.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean)
     : [];
 
-  // Contar dispositivos únicos previos en el historial
-  const seenDevices = {};
-  for (let i = 0; i < lines.length; i++) {
-    const devInLine = extraerPrimerDeviceIdDeTexto_(lines[i]);
-    if (devInLine) seenDevices[devInLine] = true;
-  }
+  // Mapear cada dispositivo único a su número de orden fijo (1, 2, 3...)
+  const deviceOrderMap = {};
+  let totalUniqueDevices = 0;
+
   if (record.primaryDeviceId) {
-    seenDevices[record.primaryDeviceId] = true;
+    totalUniqueDevices = 1;
+    deviceOrderMap[record.primaryDeviceId] = 1;
   }
 
-  const isNewDeviceForWorker = !seenDevices[deviceId];
+  for (let i = 0; i < lines.length; i++) {
+    const devInLine = extraerPrimerDeviceIdDeTexto_(lines[i]);
+    if (devInLine && !deviceOrderMap[devInLine]) {
+      totalUniqueDevices++;
+      deviceOrderMap[devInLine] = totalUniqueDevices;
+    }
+  }
+
+  const isNewDeviceForWorker = !deviceOrderMap[deviceId];
   if (isNewDeviceForWorker) {
-    seenDevices[deviceId] = true;
-    const numOrden = Object.keys(seenDevices).length;
+    totalUniqueDevices++;
+    deviceOrderMap[deviceId] = totalUniqueDevices;
+    const numOrden = deviceOrderMap[deviceId];
     const notaDueno = belongsToOtherWorker
       ? (" · Celular de: " + ownerOfDevice.workerName)
-      : " · Adicional";
+      : (" · Adicional #" + numOrden);
     lines.push(
       numOrden + ") " + etiquetaEquipo + " [Visto " + localTime.slice(0, 10) + notaDueno + "]"
     );
   }
 
-  const totalUniqueDevices = Object.keys(seenDevices).length;
+  const specificDeviceNumber = deviceOrderMap[deviceId] || totalUniqueDevices;
 
-  // Determinar resultado de auditoría para esta acción/checada
+  // Determinar resultado de auditoría usando el número específico de ese celular (specificDeviceNumber)
   let deviceLevel = "primary";
   let deviceAudit = "✅ Celular titular (" + deviceId + ")";
   let deviceNote = "";
@@ -677,10 +992,10 @@ function evaluarYActualizarDispositivoTrabajador_(workersSheet, dir, record, dev
       " (" + etiquetaEquipo + ").";
   } else if (!isWorkerPrimary) {
     deviceLevel = "secondary";
-    deviceAudit = "⚠️ Celular adicional #" + totalUniqueDevices + " (" + deviceId + ")";
+    deviceAudit = "⚠️ Celular adicional #" + specificDeviceNumber + " (" + deviceId + ")";
     deviceNote =
-      "ℹ️ DISPOSITIVO ADICIONAL / NUEVO: El celular titular de " + record.workerName +
-      " es " + record.primaryDeviceId + ", pero este registro se envió desde " + etiquetaEquipo + ".";
+      "ℹ️ DISPOSITIVO ADICIONAL #" + specificDeviceNumber + ": El celular titular de " + record.workerName +
+      " es " + record.primaryDeviceId + ", pero este registro se envió desde su dispositivo #" + specificDeviceNumber + " (" + etiquetaEquipo + ").";
   }
 
   // Determinar estado resumen en la pestaña "Trabajadores"
@@ -783,7 +1098,6 @@ function sincronizarTrabajadorYDispositivo_(spreadsheet, data, localTime, eventT
   // Si enviaron un workerId ya existente en la hoja:
   if (rawId && dir.byId[rawId]) {
     const existing = dir.byId[rawId];
-    // Si es un alta nueva ("ALTA") y el ID aleatorio colisionó con otra persona distinta en otro celular, generar otro ID
     const samePersonOrDevice =
       existing.workerName.toLowerCase() === inputName.toLowerCase() ||
       existing.primaryDeviceId === deviceId;
@@ -919,11 +1233,6 @@ function obtenerPrimeraHojaCronos_(spreadsheet) {
   return sheets[0];
 }
 
-/**
- * Si una pestaña mensual existente tenía el esquema anterior de 9 columnas,
- * la actualiza automáticamente al esquema de 11 columnas (agregando ID Trabajador
- * y Dispositivo / Auditoría) y re-firma la cadena del mes con el secreto del servidor.
- */
 function migrarHoja9a11Columnas_(sheet) {
   if (sheet.getLastColumn() >= 11 && String(sheet.getRange(1, 11).getValue() || "") === CRONOS_HEADERS[10]) {
     return;
@@ -936,7 +1245,7 @@ function migrarHoja9a11Columnas_(sheet) {
   const ymHoja = parsearYmDesdeNombreHoja_(sheet.getName()) || "";
   const secret = obtenerSecretoHmac_();
   const props = PropertiesService.getScriptProperties();
-  const headKey = "CRONOS_CHAIN_HEAD_" + sheet.getSheetId();
+  const headKey = obtenerClaveCabezaCadena_(sheet.getParent ? sheet.getParent() : SpreadsheetApp.getActiveSpreadsheet(), sheet);
 
   const oldRows = [];
   const oldLinks = [];
@@ -1053,27 +1362,29 @@ function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
       sheet = spreadsheet.insertSheet(nombreMesHoja, 0);
     }
 
-    inicializarHojaCronos_(sheet);
+    inicializarHojaCronos_(sheet, spreadsheet);
     return sheet;
   }
 
   if (sheet.getLastRow() === 0) {
-    inicializarHojaCronos_(sheet);
+    inicializarHojaCronos_(sheet, spreadsheet);
   } else {
     if (sheet.getLastColumn() === 9 && String(sheet.getRange(1, 9).getValue() || "") === CRONOS_HEADERS[10]) {
       migrarHoja9a11Columnas_(sheet);
     }
     if (sheet.getLastRow() === 1) {
-      PropertiesService.getScriptProperties().deleteProperty("CRONOS_CHAIN_HEAD_" + sheet.getSheetId());
+      PropertiesService.getScriptProperties().deleteProperty(obtenerClaveCabezaCadena_(spreadsheet, sheet));
     }
   }
 
   return sheet;
 }
 
-function inicializarHojaCronos_(sheet) {
+function inicializarHojaCronos_(sheet, spreadsheet) {
   sheet.clear();
-  PropertiesService.getScriptProperties().deleteProperty("CRONOS_CHAIN_HEAD_" + sheet.getSheetId());
+  if (spreadsheet) {
+    PropertiesService.getScriptProperties().deleteProperty(obtenerClaveCabezaCadena_(spreadsheet, sheet));
+  }
 
   const headerRange = sheet.getRange(1, 1, 1, 11);
   headerRange.setValues([CRONOS_HEADERS]);
@@ -1224,9 +1535,6 @@ function extraerCodigoSello_(rawCell) {
     .trim();
 }
 
-/**
- * Calcula el sello HMAC-SHA256 encadenado (11 columnas).
- */
 function calcularSelloFila_(ymCodigo, seq, prevSeal, campos, secret) {
   const seqPad = String(seq).padStart(4, "0");
   const partes = ymCodigo ? [ymCodigo, seqPad] : [seqPad];
@@ -1354,7 +1662,8 @@ function auditarFilasInterno_(sheet, checkDeletedTail) {
 
   if (checkDeletedTail) {
     const props = PropertiesService.getScriptProperties();
-    const headRaw = props.getProperty("CRONOS_CHAIN_HEAD_" + sheet.getSheetId());
+    const ss = sheet.getParent ? sheet.getParent() : SpreadsheetApp.getActiveSpreadsheet();
+    const headRaw = props.getProperty(obtenerClaveCabezaCadena_(ss, sheet));
     if (headRaw) {
       try {
         const head = JSON.parse(headRaw);
