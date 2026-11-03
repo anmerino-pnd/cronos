@@ -390,52 +390,142 @@ function obtenerCatalogoHojasAdmin_(defaultOrgName, localTime) {
   return list;
 }
 
+function leerPerfilAdminGuardado_() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const raw = props.getProperty("CRONOS_ADMIN_PROFILE");
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function generarIdAdminUnico_(usedIdsMap) {
+  const map = usedIdsMap || {};
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const rest = Math.floor(Math.random() * 10000000);
+    const candidate = "9" + String(rest).padStart(7, "0");
+    if (!map[candidate]) return candidate;
+  }
+  return "9" + String(Math.floor(1000000 + Math.random() * 8999999));
+}
+
 function gestionarAutenticacionAdmin_(data, localTime) {
   const props = PropertiesService.getScriptProperties();
   const secret = obtenerSecretoHmac_();
   const inputPin = String(data.adminPin || "").trim();
   const inputOrgName = String(data.orgName || "").trim();
+  const inputAdminName = String(data.adminName || "").trim().replace(/\s+/g, " ");
+  const requestedAdminId = normalizarIdTrabajador8_(data.adminId);
+  const primarySs = SpreadsheetApp.getActiveSpreadsheet();
+  const workersSheet = obtenerHojaTrabajadoresCronos_(primarySs);
+  const dir = leerDirectorioTrabajadores_(workersSheet);
 
-  let profile = null;
-  try {
-    const rawProfile = props.getProperty("CRONOS_ADMIN_PROFILE");
-    if (rawProfile) profile = JSON.parse(rawProfile);
-  } catch (_) {
-    profile = null;
-  }
+  let profile = leerPerfilAdminGuardado_();
 
-  // Si aún no existe perfil de Admin con PIN y enviaron un PIN nuevo -> registrarlo
+  // Si aún no existe perfil completo de Admin y enviaron un PIN -> crear / completar perfil
   if (!profile || !profile.pinHash) {
     if (inputPin) {
-      if (inputPin.length < 4) {
+      if (!/^\d{4}$/.test(inputPin)) {
         return {
           status: "error",
-          message: "El PIN o contraseña de administrador debe tener al menos 4 caracteres."
+          message: "El PIN de administrador debe tener exactamente 4 números (ej. 1234)."
         };
       }
+      if (inputAdminName && inputAdminName.length < 2) {
+        return {
+          status: "error",
+          message: "Escribe tu nombre completo de Administrador (mínimo 2 caracteres)."
+        };
+      }
+
+      // Garantizar que el ID de Admin de 8 dígitos nunca colisione con ningún trabajador existente
+      let finalAdminId = requestedAdminId;
+      if (!finalAdminId || (dir.byId[finalAdminId] && dir.byId[finalAdminId].workerName.toLowerCase() !== inputAdminName.toLowerCase())) {
+        finalAdminId = generarIdAdminUnico_(dir.byId);
+      }
+
+      const finalAdminName = inputAdminName || "Administrador";
+
       profile = {
+        adminId: finalAdminId,
+        formattedAdminId: formatearIdTrabajador_(finalAdminId),
+        adminName: finalAdminName,
         pinHash: calcularHashPinAdmin_(inputPin, secret),
         createdAt: localTime
       };
       props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
+
+      // Registrar al Admin en la pestaña Trabajadores para reservar su ID y habilitar su Checador
+      sincronizarTrabajadorYDispositivo_(
+        primarySs,
+        {
+          workerId: finalAdminId,
+          workerName: finalAdminName,
+          deviceId: data.deviceId || "CEL-ADMIN001",
+          deviceLabel: data.deviceLabel || "Admin",
+          preserveExistingId: true
+        },
+        localTime,
+        "ADMIN"
+      );
     }
+
     const sheets = obtenerCatalogoHojasAdmin_(inputOrgName, localTime);
     return {
       status: "ok",
       action: "admin_auth",
       mode: inputPin ? "profile_created" : "unlocked",
+      isAdmin: true,
       hasPin: !!(profile && profile.pinHash),
+      adminId: profile ? (profile.adminId || "") : "",
+      formattedAdminId: profile && profile.adminId ? formatearIdTrabajador_(profile.adminId) : "",
+      adminName: profile ? (profile.adminName || "") : "",
       sheets: sheets
     };
   }
 
-  // Si ya tiene PIN configurado, validarlo
+  // Si ya tiene PIN configurado, validar PIN de 4 números
   if (!inputPin || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
     return {
       status: "auth_error",
       hasPin: true,
-      message: "PIN o contraseña de administrador incorrecta."
+      message: "El PIN de 4 números de Administrador es incorrecto."
     };
+  }
+
+  // Si inició sesión por ID de Admin, verificar que coincida (o actualizar perfil heredado si no tenía adminId)
+  if (!profile.adminId) {
+    let upgradedId = requestedAdminId;
+    if (!upgradedId || dir.byId[upgradedId]) {
+      upgradedId = generarIdAdminUnico_(dir.byId);
+    }
+    profile.adminId = upgradedId;
+    profile.formattedAdminId = formatearIdTrabajador_(upgradedId);
+    profile.adminName = inputAdminName || profile.adminName || "Administrador";
+    props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
+  } else if (data.loginById === true && requestedAdminId && requestedAdminId !== profile.adminId) {
+    return {
+      status: "auth_error",
+      hasPin: true,
+      message: "El ID de Administrador de 8 dígitos no coincide con el registrado en este conector."
+    };
+  }
+
+  // Sincronizar también en la pestaña Trabajadores para que el Admin pueda checar asistencia
+  if (profile.adminId && profile.adminName) {
+    sincronizarTrabajadorYDispositivo_(
+      primarySs,
+      {
+        workerId: profile.adminId,
+        workerName: profile.adminName,
+        deviceId: data.deviceId || "CEL-ADMIN001",
+        deviceLabel: data.deviceLabel || "Admin",
+        preserveExistingId: true
+      },
+      localTime,
+      "ADMIN"
+    );
   }
 
   const sheets = obtenerCatalogoHojasAdmin_(inputOrgName, localTime);
@@ -443,7 +533,11 @@ function gestionarAutenticacionAdmin_(data, localTime) {
     status: "ok",
     action: "admin_auth",
     mode: "logged_in",
+    isAdmin: true,
     hasPin: true,
+    adminId: profile.adminId,
+    formattedAdminId: formatearIdTrabajador_(profile.adminId),
+    adminName: profile.adminName,
     sheets: sheets
   };
 }
@@ -457,7 +551,7 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
   const props = PropertiesService.getScriptProperties();
   const secret = obtenerSecretoHmac_();
   const inputPin = String(data.adminPin || "").trim();
-  const newOrgName = String(data.orgName || "").trim().replace(/\s+/g, " ");
+  const newOrgName = String(data.newOrgName || data.orgName || "").trim().replace(/\s+/g, " ");
   const copyWorkers = data.copyWorkers === true;
   const sourceSheetId = String(data.sourceSheetId || "").trim();
 
@@ -469,24 +563,23 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
   }
 
   // Verificar PIN si el perfil de Admin tiene uno configurado
-  let profile = null;
-  try {
-    const rawProfile = props.getProperty("CRONOS_ADMIN_PROFILE");
-    if (rawProfile) profile = JSON.parse(rawProfile);
-  } catch (_) {}
+  let profile = leerPerfilAdminGuardado_();
 
   if (profile && profile.pinHash) {
     if (!inputPin || calcularHashPinAdmin_(inputPin, secret) !== profile.pinHash) {
       return {
         status: "auth_error",
-        message: "PIN o contraseña de administrador incorrecta para crear una nueva hoja."
+        message: "PIN de 4 números de administrador incorrecto para crear una nueva hoja."
       };
     }
-  } else if (inputPin && inputPin.length >= 4) {
+  } else if (inputPin && /^\d{4}$/.test(inputPin)) {
     profile = {
+      adminId: normalizarIdTrabajador8_(data.adminId) || generarIdAdminUnico_({}),
+      adminName: String(data.adminName || "Administrador").trim(),
       pinHash: calcularHashPinAdmin_(inputPin, secret),
       createdAt: localTime
     };
+    profile.formattedAdminId = formatearIdTrabajador_(profile.adminId);
     props.setProperty("CRONOS_ADMIN_PROFILE", JSON.stringify(profile));
   }
 
@@ -532,6 +625,20 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
         workersCopiedCount = workerRows.length;
       }
     }
+  } else if (profile && profile.adminId && profile.adminName) {
+    // Incluso si no se copian todos los trabajadores, asegurar que el Admin esté en la nueva hoja para poder checar
+    sincronizarTrabajadorYDispositivo_(
+      newSs,
+      {
+        workerId: profile.adminId,
+        workerName: profile.adminName,
+        deviceId: data.deviceId || "CEL-ADMIN001",
+        deviceLabel: data.deviceLabel || "Admin",
+        preserveExistingId: true
+      },
+      localTime,
+      "ADMIN"
+    );
   }
 
   // 4. Registrar la nueva hoja en el catálogo del Admin
@@ -543,6 +650,7 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
     sheetUrl: obtenerUrlSpreadsheetSeguro_(newSs),
     isPrimary: false,
     workersCopied: workersCopiedCount,
+    copiedWorkersCount: workersCopiedCount,
     createdAt: localTime
   };
   sheets.push(newEntry);
@@ -551,6 +659,11 @@ function crearNuevaHojaDesdeAdmin_(data, localTime) {
   return {
     status: "ok",
     action: "admin_create_sheet",
+    sheetId: newEntry.sheetId,
+    orgName: newOrgName,
+    sheetUrl: newEntry.sheetUrl,
+    copiedWorkersCount: workersCopiedCount,
+    createdSheet: newEntry,
     newSheet: newEntry,
     sheets: sheets
   };
@@ -741,13 +854,18 @@ function formatearIdTrabajador_(digits8) {
 }
 
 function generarIdTrabajadorUnico_(usedIdsMap) {
+  const map = usedIdsMap || {};
+  const adminProfile = leerPerfilAdminGuardado_();
+  const reservedAdminId = adminProfile && adminProfile.adminId ? adminProfile.adminId : "";
+
   for (let attempt = 0; attempt < 50; attempt++) {
-    const first = Math.floor(1 + Math.random() * 9);
+    // Los IDs de trabajadores empiezan con dígitos 1-8 (el prefijo 9 se reserva para Admin)
+    const first = Math.floor(1 + Math.random() * 8);
     const rest = Math.floor(Math.random() * 10000000);
     const candidate = String(first) + String(rest).padStart(7, "0");
-    if (!usedIdsMap[candidate]) return candidate;
+    if (!map[candidate] && candidate !== reservedAdminId) return candidate;
   }
-  return String(Math.floor(10000000 + Math.random() * 90000000));
+  return String(Math.floor(10000000 + Math.random() * 80000000));
 }
 
 function extraerDeviceIdLimpio_(rawDeviceId) {
@@ -1040,10 +1158,66 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
   if (!rawId) {
     return {
       status: "error",
-      message: "El ID de trabajador debe contener exactamente 8 dígitos numéricos."
+      message: "El ID debe contener exactamente 8 dígitos numéricos."
     };
   }
 
+  // 1. Verificar si el ID de 8 dígitos pertenece al Perfil de Administrador
+  const adminProfile = leerPerfilAdminGuardado_();
+  if (adminProfile && adminProfile.adminId && adminProfile.adminId === rawId) {
+    const inputPin = String(data.adminPin || "").trim();
+    if (!inputPin) {
+      return {
+        status: "admin_pin_required",
+        isAdmin: true,
+        workerId: adminProfile.adminId,
+        formattedWorkerId: formatearIdTrabajador_(adminProfile.adminId),
+        workerName: adminProfile.adminName || "Administrador",
+        message: "ID de Administrador reconocido. Ingresa tu PIN de 4 números para continuar."
+      };
+    }
+
+    const secret = obtenerSecretoHmac_();
+    if (!/^\d{4}$/.test(inputPin) || calcularHashPinAdmin_(inputPin, secret) !== adminProfile.pinHash) {
+      return {
+        status: "admin_pin_invalid",
+        isAdmin: true,
+        workerId: adminProfile.adminId,
+        formattedWorkerId: formatearIdTrabajador_(adminProfile.adminId),
+        workerName: adminProfile.adminName || "Administrador",
+        message: "El PIN de 4 números de Administrador es incorrecto."
+      };
+    }
+
+    // PIN de Admin válido: sincronizar en Trabajadores (para habilitar su Checador) y devolver catálogo de hojas
+    const syncAdmin = sincronizarTrabajadorYDispositivo_(
+      spreadsheet,
+      {
+        workerId: adminProfile.adminId,
+        workerName: adminProfile.adminName || "Administrador",
+        deviceId: data.deviceId,
+        deviceLabel: data.deviceLabel,
+        preserveExistingId: true
+      },
+      localTime,
+      "SESIÓN ADMIN"
+    );
+    const sheets = obtenerCatalogoHojasAdmin_("", localTime);
+
+    return {
+      status: "ok",
+      action: "login_worker",
+      isAdmin: true,
+      workerId: syncAdmin.workerId,
+      formattedWorkerId: syncAdmin.formattedWorkerId,
+      workerName: syncAdmin.workerName,
+      deviceAudit: syncAdmin.deviceAudit,
+      deviceLevel: syncAdmin.deviceLevel,
+      sheets: sheets
+    };
+  }
+
+  // 2. Flujo normal de trabajador en pestaña "Trabajadores"
   const workersSheet = obtenerHojaTrabajadoresCronos_(spreadsheet);
   const dir = leerDirectorioTrabajadores_(workersSheet);
   const record = dir.byId[rawId];
@@ -1073,6 +1247,7 @@ function iniciarSesionPorIdTrabajador_(spreadsheet, data, localTime) {
   return {
     status: "ok",
     action: "login_worker",
+    isAdmin: false,
     workerId: evalRes.workerId,
     formattedWorkerId: evalRes.formattedWorkerId,
     workerName: evalRes.workerName,

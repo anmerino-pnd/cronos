@@ -1,26 +1,36 @@
 # Cronos · Checador PWA Serverless
 
-Aplicación Web Progresiva (**PWA**) de uso libre y código abierto diseñada para el registro de asistencia (**Entrada / Salida**) con geolocalización GPS verificada y hora oficial de servidor para equipos de trabajo en campo (ej. PyMEs de limpieza, mantenimiento, seguridad o rutas).
+[![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white)](https://developer.mozilla.org/es/docs/Web/HTML)
+[![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white)](https://developer.mozilla.org/es/docs/Web/CSS)
+[![JavaScript ES2022](https://img.shields.io/badge/JavaScript_ES2022-F7DF1E?style=for-the-badge&logo=javascript&logoColor=0F172A)](https://developer.mozilla.org/es/docs/Web/JavaScript)
+[![PWA Ready](https://img.shields.io/badge/PWA-Installable-5A0FC8?style=for-the-badge&logo=pwa&logoColor=white)](./manifest.json)
+[![Google Apps Script](https://img.shields.io/badge/Google_Apps_Script-4285F4?style=for-the-badge&logo=google&logoColor=white)](./backend/Code.gs)
+[![Google Sheets](https://img.shields.io/badge/Google_Sheets-34A853?style=for-the-badge&logo=googlesheets&logoColor=white)](https://sheets.new)
+[![HMAC-SHA256](https://img.shields.io/badge/Seguridad-HMAC--SHA256-059669?style=for-the-badge&logo=shield&logoColor=white)](./backend/Code.gs)
+[![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub_Pages-181717?style=for-the-badge&logo=github&logoColor=white)](https://anmerino-pnd.github.io/cronos/)
+[![License](https://img.shields.io/badge/Licencia-MIT-F59E0B?style=for-the-badge)](./LICENSE)
+
+Aplicación Web Progresiva (**PWA**) de uso libre y código abierto diseñada para el registro de asistencia (**Entrada / Salida**) con geolocalización GPS verificada, auditoría de dispositivos y hora oficial de servidor para equipos de trabajo en campo (ej. PyMEs de limpieza, mantenimiento, seguridad o rutas).
 
 * **Costo de infraestructura:** `$0 USD` (100% Serverless, sin servidores intermedios ni suscripciones).
 * **Privacidad y propiedad de datos:** Cada empresa conecta su propia hoja de **Google Sheets** mediante **Google Apps Script**.
-* **Arquitectura 0-Build:** HTML5 + CSS + Vanilla JavaScript (ES Modules), lista para publicar directamente en **GitHub Pages**, **Cloudflare Pages** o **Vercel**.
+* **Arquitectura 0-Build:** HTML5 + CSS3 + Vanilla JavaScript (ES Modules), lista para publicar directamente en **GitHub Pages**, **Cloudflare Pages** o **Vercel**.
 * **Ultraligera:** Carga inicial menor a **65 KB**, con carga diferida (*lazy-load*) de módulos de código QR únicamente cuando se utilizan.
 * **Multiplataforma:** Funciona e instala en pantalla de inicio tanto en **Android** como en **iOS**.
 
 ---
 
-## Guía Rápida para el Administrador (Configurar en 3 minutos)
+## Guía Rápida para el Administrador (Configurar una sola vez en 3 minutos)
 
 También puedes seguir esta misma guía interactiva directamente desde el **Panel de Administrador** de la aplicación (`/admin` o `#admin`).
 
 1. **Crear la hoja de asistencia y revisar tu Zona Horaria:**
-   * Entra a [Google Sheets (`sheets.new`)](https://sheets.new) y crea una hoja de cálculo nueva. Ponle un nombre identificable (por ejemplo: *Asistencia Limpieza*).
+   * Entra a [Google Sheets (`sheets.new`)](https://sheets.new) y crea una hoja de cálculo nueva. Ponle un nombre identificable (por ejemplo: *Asistencia Limpieza 2026*).
    * Ve a **Archivo > Configuración > General > Zona horaria** y asegúrate de que corresponda a tu región (ej. *(GMT-07:00) Hermosillo* o la ciudad donde opere tu equipo).
 2. **Nombrar y guardar el conector en Apps Script:**
    * En el menú superior, haz clic en **Extensiones > Apps Script**.
    * Arriba a la izquierda haz clic donde dice **Proyecto sin título** y cámbiale el nombre copiando y pegando: `Cronos - Conector de Asistencia`.
-   * Borra todo el código que aparece por defecto en el editor y pega íntegramente el código de [`backend/Code.gs`](./backend/Code.gs) (también incluido abajo).
+   * Borra todo el código que aparece por defecto en el editor y pega íntegramente el código de [`backend/Code.gs`](./backend/Code.gs).
    * Arriba del editor, presiona el ícono del disquete llamado **Guardar proyecto en Drive** (o `Ctrl + S`).
 3. **Configurar la Nueva implementación:**
    * Arriba a la derecha, haz clic en el botón azul **Implementar > Nueva implementación**.
@@ -35,12 +45,17 @@ También puedes seguir esta misma guía interactiva directamente desde el **Pane
    * Haz clic abajo a la izquierda en **Avanzado** (o **Configuración avanzada**).
    * Haz clic abajo en **Ir a Cronos - Conector de Asistencia (unsafe)** / **(no seguro)**.
    * Presiona **Continuar** (o **Permitir**).
-5. **Vincular con Cronos y activar tu Perfil de Administrador:**
+5. **Crear tu Perfil de Administrador (ID de 8 dígitos + PIN de 4 números + Checador integrado):**
    * Copia la **URL de la aplicación web** que termina en `/exec`.
-   * Abre Cronos en modo Administrador (`/#admin` o `/admin`), escribe el nombre de tu empresa/hoja, pega la URL, define un **PIN de Admin** (opcional) y presiona **Generar Acceso y Conectar Perfil**.
-   * Presiona **Probar conexión** para verificar que se inserte una fila de prueba en tu hoja, e imprime el **Cartel QR** o comparte el **Magic Link por WhatsApp** con tu equipo.
+   * Abre Cronos en modo Administrador (`/#admin` o `/admin`) y completa tu perfil:
+     * **Nombre de la empresa / hoja principal** y **URL del Apps Script (`/exec`)**.
+     * **Tu nombre completo (Administrador):** queda registrado también en la pestaña `Trabajadores` por si tú también necesitas checar Entrada/Salida.
+     * **Tu ID único de Administrador (8 dígitos, serie `9XXX-XXXX`):** nunca colisiona con los IDs de trabajadores (`1XXX-XXXX` a `8XXX-XXXX`).
+     * **Tu PIN de seguridad de exactamente 4 números** (ej. `2580`).
+   * Presiona **Guardar mi Perfil de Admin y Generar QR**. Tu perfil queda guardado en tu celular/navegador y te habilita un botón directo para alternar entre tu **Checador personal (Entrada / Salida)** y tu **Panel de Administrador (QR y Hojas)**.
+   * Si abres el link de la empresa en cualquier otro celular o navegador, solo toca **"Ya tengo mi ID"**, escribe tu **ID de Admin de 8 dígitos** + tu **PIN de 4 números**, y tendrás tanto tu sección de Checador como todas las herramientas de Administrador desbloqueadas.
 6. **Crear nuevas hojas de Google Sheets en 1 clic (sin volver a tocar Apps Script):**
-   * Una vez configurado tu conector por primera vez, desde la sección **Mis Hojas de Google Sheets** en `/admin` puedes escribir el nombre de un nuevo archivo (ej. *Asistencia Limpieza 2027*), elegir opcionalmente si deseas **copiar la pestaña `Trabajadores` de la hoja actual** (desmarcado por defecto, para que tú decidas si conservar los IDs de 8 dígitos, nombres congelados e historial de celulares) y presionar **`➕ Crear nuevo Google Sheets y generar QR`**.
+   * Una vez configurado tu perfil por primera vez, desde la sección **Mis Hojas de Google Sheets** en `/admin` puedes escribir el nombre de un nuevo archivo (ej. *Asistencia Limpieza 2027*), elegir opcionalmente si deseas **copiar la pestaña `Trabajadores` de la hoja actual** (desmarcado por defecto, para que tú decidas si conservar los IDs de 8 dígitos, nombres congelados e historial de celulares) y presionar **`➕ Crear nuevo Google Sheets y generar QR`**.
    * El conector creará el nuevo archivo directamente en tu Google Drive con su pestaña mensual y directorio listos, y generará su nuevo código QR y enlace de invitación al instante.
 
 ### Pestañas Mensuales, Diseño Automático y Sello Criptográfico (`backend/Code.gs`)

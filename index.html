@@ -216,6 +216,24 @@
               </p>
             </div>
 
+            <!-- Shown when the 8-digit ID belongs to the Administrator -->
+            <div class="field" id="login-admin-pin-box" hidden>
+              <label class="field-label" for="input-login-admin-pin">👑 PIN de Administrador (exactamente 4 números)</label>
+              <input
+                type="password"
+                id="input-login-admin-pin"
+                class="input-text input-mono input-id-code"
+                inputmode="numeric"
+                pattern="[0-9]{4}"
+                placeholder="Ej. 1234"
+                autocomplete="off"
+                maxlength="4"
+              >
+              <p class="field-hint" id="login-admin-pin-hint">
+                ID de Administrador reconocido. Ingresa tu PIN de 4 números para abrir tus opciones de Admin y tu Checador.
+              </p>
+            </div>
+
             <!-- Shown only if the 8-digit ID is valid but used for the first time on a brand-new Sheet -->
             <div class="field" id="login-bind-name-box" hidden>
               <label class="field-label" for="input-bind-worker-name">Nombre completo (1ª vez en esta hoja)</label>
@@ -255,6 +273,14 @@
          VIEW 3: DAILY WORKER CHECADOR (High-Contrast Timecard)
          =================================================================== -->
     <section class="card" id="view-checador" aria-label="Checador de asistencia" hidden>
+      <!-- Admin Quick Access Bar (Visible when logged in with Admin ID) -->
+      <div class="admin-checador-bar no-print" id="admin-checador-bar" hidden>
+        <span class="admin-checador-badge">👑 Perfil de Administrador</span>
+        <button type="button" class="btn btn-emerald btn-sm" id="btn-checador-open-admin">
+          Opciones de Admin / Hojas
+        </button>
+      </div>
+
       <!-- Worker & Company Credential Header -->
       <div class="timecard-header">
         <div class="timecard-identity">
@@ -478,12 +504,24 @@
               </div>
               <div class="deploy-fields-box" style="margin-top: 0.65rem; background-color: #ECFDF5; border-color: #A7F3D0; color: #064E3B;">
                 <div>
-                  <strong>Configuración única · Crea nuevas hojas en 1 clic desde tu perfil:</strong>
-                  este paso en Apps Script <strong>solo se hace una vez</strong>. El conector crea automáticamente:
-                  <strong>1)</strong> una pestaña por cada mes (ej. <em>Noviembre 2026</em>, siempre al inicio),
-                  <strong>2)</strong> la pestaña <strong>Trabajadores</strong> que asigna un <strong>ID numérico de 8 dígitos</strong>, congela el nombre de cada empleado y registra cada celular con su número fijo (<code>#1 Titular</code>, <code>#2</code>, <code>#3</code>…),
-                  <strong>3)</strong> firma cada fila con un sello <code>HMAC-SHA256</code>, y
-                  <strong>4)</strong> habilita tu <strong>Perfil de Admin</strong> abajo para crear nuevas hojas (ej. <em>Asistencia 2027</em>) en 1 clic con un botón.
+                  <strong>Configuración única · Qué incluye automáticamente tu conector:</strong>
+                  <p style="margin: 0.25rem 0 0.45rem;">
+                    Este paso en Apps Script <strong>solo se hace una vez</strong> y tu archivo sigue siendo <strong>100% privado</strong>:
+                  </p>
+                  <ul class="guide-summary-list">
+                    <li>
+                      <strong>Pestañas mensuales automáticas:</strong> crea una pestaña por cada mes (ej. <em>Noviembre 2026</em>) y la coloca siempre al inicio.
+                    </li>
+                    <li>
+                      <strong>Directorio <code>Trabajadores</code> y rastreo de celulares:</strong> asigna un <strong>ID numérico de 8 dígitos</strong>, congela el nombre de cada persona y numera cada teléfono en orden fijo (<code>#1 Titular</code>, <code>#2</code>, <code>#3</code>…).
+                    </li>
+                    <li>
+                      <strong>Sello criptográfico <code>HMAC-SHA256</code>:</strong> firma cada registro en el servidor y detecta cualquier edición manual desde el menú <strong>&#128737;&#65039; Cronos</strong>.
+                    </li>
+                    <li>
+                      <strong>Perfil de Admin con creación de hojas en 1 clic:</strong> genera tu propio <strong>ID de Admin de 8 dígitos</strong> + <strong>PIN de 4 números</strong> para crear nuevas hojas (ej. <em>Asistencia 2027</em>) en 1 clic y contar también con tu sección de Checador.
+                    </li>
+                  </ul>
                 </div>
               </div>
             </li>
@@ -496,13 +534,71 @@
         <!-- Form & Admin Profile Column -->
         <div class="card no-print" id="admin-form-card">
           <div class="card-body">
-            <h2 class="view-title" style="font-size: 1.2rem; margin-bottom: 0.9rem;">Perfil de Admin y Acceso</h2>
+            <h2 class="view-title" style="font-size: 1.2rem; margin-bottom: 0.35rem;">Crear o Conectar Perfil de Administrador</h2>
+            <p class="view-lead" style="font-size: 0.86rem; margin-bottom: 0.95rem;">
+              Crea tu perfil con tu nombre, tu <strong>ID único de Admin (8 dígitos)</strong> y un <strong>PIN de 4 números</strong>. Así podrás abrir cualquier link de tu empresa, entrar en <em>"Ya tengo mi ID"</em> y tener disponibles tanto tus opciones de Admin como tu propio Checador.
+            </p>
+
+            <!-- Active Admin Session Shortcut to Checador -->
+            <div class="admin-session-summary" id="admin-session-summary" hidden>
+              <div class="admin-session-summary-top">
+                <span class="admin-session-summary-who">
+                  👑 <strong id="admin-summary-name">—</strong> · ID <code id="admin-summary-id">----</code>
+                </span>
+                <button type="button" class="btn-copy-chip" id="btn-copy-summary-admin-id">
+                  Copiar ID
+                </button>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-admin-go-checador">
+                ⏱️ Ir a mi sección de Checador (Registrar mi Entrada / Salida)
+              </button>
+            </div>
 
             <div class="alert alert-error" id="admin-form-error" role="alert" hidden></div>
 
             <form id="form-admin-generate" novalidate>
               <div class="field">
-                <label class="field-label" for="admin-org-name">Nombre de la Empresa / Hoja</label>
+                <label class="field-label" for="admin-worker-name">Tu Nombre Completo (Administrador)</label>
+                <input
+                  type="text"
+                  id="admin-worker-name"
+                  class="input-text"
+                  placeholder="Ej. Angel Merino"
+                  maxlength="80"
+                  autocomplete="name"
+                  required
+                >
+                <p class="field-hint">Quedará congelado a tu ID de Administrador para que también puedas checar asistencia.</p>
+              </div>
+
+              <div class="id-showcase-box" style="margin-bottom: 1rem; padding: 0.75rem 0.9rem;">
+                <span class="id-showcase-label">TU ID ÚNICO DE ADMINISTRADOR (8 DÍGITOS · NO SE REPITE CON TRABAJADORES)</span>
+                <div class="id-showcase-digits" id="admin-generated-id" style="font-size: 1.55rem;">9000-0000</div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-admin-id">
+                  Copiar mi ID de Admin (8 dígitos)
+                </button>
+              </div>
+
+              <div class="field">
+                <label class="field-label" for="admin-pin">PIN de Seguridad de Admin (exactamente 4 números)</label>
+                <input
+                  type="password"
+                  id="admin-pin"
+                  class="input-text input-mono input-id-code"
+                  inputmode="numeric"
+                  pattern="[0-9]{4}"
+                  placeholder="Ej. 1234 (4 números)"
+                  maxlength="4"
+                  autocomplete="new-password"
+                  required
+                >
+                <p class="field-hint">
+                  <strong>Longitud obligatoria: 4 dígitos numéricos (0-9).</strong> Guárdalo junto con tu ID de 8 dígitos para iniciar sesión como Admin desde cualquier celular o navegador.
+                </p>
+              </div>
+
+              <div class="field">
+                <label class="field-label" for="admin-org-name">Nombre de la Empresa / Hoja principal</label>
                 <input
                   type="text"
                   id="admin-org-name"
@@ -527,21 +623,8 @@
                 <p class="field-hint">Pega la URL <code>/exec</code> de tu conector (solo la configuras una vez).</p>
               </div>
 
-              <div class="field">
-                <label class="field-label" for="admin-pin">PIN o Contraseña de Admin <span style="font-weight: 500; color: var(--text-muted);">(opcional)</span></label>
-                <input
-                  type="password"
-                  id="admin-pin"
-                  class="input-text"
-                  placeholder="Crea o ingresa tu PIN para sincronizar tus hojas"
-                  maxlength="40"
-                  autocomplete="current-password"
-                >
-                <p class="field-hint">Guarda tus hojas en tu conector y protege la creación de nuevos archivos en Drive.</p>
-              </div>
-
               <button type="submit" class="btn btn-emerald btn-block" id="btn-generate-access">
-                Generar Acceso y Conectar Perfil
+                Guardar Perfil de Admin y Generar QR
               </button>
             </form>
 

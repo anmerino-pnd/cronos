@@ -32,6 +32,7 @@ const state = {
   quickSwitchMode: false, // true when active worker taps "Cambiar QR / Hoja" keeping their session & ID
   registerAuthTab: 'new', // 'new' | 'id'
   pendingNewWorkerId: '', // 8-digit ID pre-generated for "Soy nuevo"
+  pendingAdminId: '', // 8-digit Admin ID pre-generated in /admin (starts with 9)
   pendingCompany: null, // { scriptId, orgName, sheetId, isSessionSwitch: boolean }
   lastAttemptedPunchType: null, // 'ENTRADA' | 'SALIDA'
   pendingRepeatType: null,
@@ -45,6 +46,8 @@ const state = {
   activeAdminAccess: null, // { scriptId, orgName, sheetId, sheetUrl, token, magicLink }
   adminSheetsCatalog: [], // [{ sheetId, orgName, sheetUrl, createdAt, isPrimary }]
   adminPin: '',
+  adminId: '',
+  adminName: '',
   deviceId: '' // Persistent phone identifier (CEL-XXXXXXXX)
 };
 
@@ -68,10 +71,12 @@ function cacheElements() {
     'pane-auth-new', 'pane-auth-id',
     'form-worker-register', 'input-worker-name',
     'register-generated-id', 'btn-copy-register-id',
-    'input-worker-id', 'login-bind-name-box', 'input-bind-worker-name',
+    'input-worker-id', 'login-admin-pin-box', 'input-login-admin-pin', 'login-admin-pin-hint',
+    'login-bind-name-box', 'input-bind-worker-name',
     'input-privacy-accept', 'btn-save-worker', 'btn-cancel-register',
     // View 3: Checador
-    'view-checador', 'checador-org-name', 'checador-worker-name',
+    'view-checador', 'admin-checador-bar', 'btn-checador-open-admin',
+    'checador-org-name', 'checador-worker-name',
     'checador-worker-id', 'btn-copy-worker-id', 'worker-id-copy-tag',
     'btn-card-options',
     'live-clock-time', 'live-clock-date', 'btn-punch-in', 'btn-punch-out',
@@ -83,7 +88,10 @@ function cacheElements() {
     'btn-pwa-install', 'btn-pwa-dismiss',
     // View 4: Admin
     'view-admin', 'admin-setup-guide', 'btn-copy-gas', 'gas-code-preview',
-    'admin-grid', 'admin-form-card', 'admin-form-error', 'form-admin-generate',
+    'admin-grid', 'admin-form-card', 'admin-session-summary',
+    'admin-summary-name', 'admin-summary-id', 'btn-copy-summary-admin-id', 'btn-admin-go-checador',
+    'admin-form-error', 'form-admin-generate',
+    'admin-worker-name', 'admin-generated-id', 'btn-copy-admin-id',
     'admin-org-name', 'admin-script-url', 'admin-pin', 'btn-generate-access',
     'admin-sheets-panel', 'admin-sheets-count-badge', 'admin-sheets-list',
     'admin-create-sheet-status', 'form-admin-create-sheet', 'new-sheet-org-name',
@@ -239,13 +247,30 @@ function formatPartialWorkerIdInput(raw) {
 }
 
 function generateRandomWorkerId8() {
+  // Worker IDs start with digits 1-8 (10000000 - 89999999) so they never collide with Admin IDs (9XXXXXXX)
   if (window.crypto && window.crypto.getRandomValues) {
     const arr = new Uint32Array(1);
     window.crypto.getRandomValues(arr);
-    const num = 10000000 + (arr[0] % 90000000);
+    const num = 10000000 + (arr[0] % 80000000);
     return String(num);
   }
-  return String(Math.floor(10000000 + Math.random() * 90000000));
+  return String(Math.floor(10000000 + Math.random() * 80000000));
+}
+
+function generateRandomAdminId8() {
+  // Admin IDs start with digit 9 (90000000 - 99999999) so they are mathematically disjoint from Worker IDs
+  if (window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    const num = 90000000 + (arr[0] % 10000000);
+    return String(num);
+  }
+  return String(Math.floor(90000000 + Math.random() * 10000000));
+}
+
+function normalizeAdminPin4(raw) {
+  const digits = String(raw || '').replace(/\D+/g, '').slice(0, 4);
+  return digits.length === 4 ? digits : '';
 }
 
 function rememberWorkerLocally(workerId, workerName) {
@@ -593,6 +618,8 @@ function applyDecodedInvite({ scriptId, orgName, sheetId = '' }) {
       sheetId: cleanSheetId,
       workerId: existing.workerId,
       workerName: existing.workerName,
+      isAdmin: Boolean(existing.isAdmin),
+      adminPin: existing.adminPin || '',
       privacyAccepted: true,
       configuredAt: new Date().toISOString()
     };
@@ -802,6 +829,12 @@ function openRegistrationForCompany({ scriptId, orgName, sheetId = '', isSession
   el['register-error'].hidden = true;
   el['login-bind-name-box'].hidden = true;
   el['input-bind-worker-name'].value = '';
+  if (el['login-admin-pin-box']) {
+    el['login-admin-pin-box'].hidden = true;
+  }
+  if (el['input-login-admin-pin']) {
+    el['input-login-admin-pin'].value = '';
+  }
   el['input-worker-id'].value = '';
   el['register-generated-id'].textContent = formatWorkerId8(state.pendingNewWorkerId);
 
@@ -882,12 +915,14 @@ async function handleSaveWorkerRegistration(event) {
       sheetId: state.pendingCompany.sheetId || '',
       workerId,
       workerName,
+      isAdmin: false,
+      adminPin: '',
       toastMsg: `Perfil guardado correctamente · ID ${formatWorkerId8(workerId)}`
     });
     return;
   }
 
-  // MODE B: Existing Worker Login by 8-Digit Numeric ID ("Ya tengo mi ID")
+  // MODE B: Existing Worker or Admin Login by 8-Digit Numeric ID ("Ya tengo mi ID")
   const digits8 = normalizeWorkerId8(el['input-worker-id'].value);
   if (!digits8) {
     el['register-error'].textContent =
@@ -902,6 +937,18 @@ async function handleSaveWorkerRegistration(event) {
       'Debes aceptar el aviso de privacidad sobre el uso puntual de tu ubicación GPS para continuar.';
     el['register-error'].hidden = false;
     el['input-privacy-accept'].focus();
+    return;
+  }
+
+  // If the Admin PIN box is already shown, require a valid 4-digit numeric PIN before calling the server
+  const adminPinBoxVisible = el['login-admin-pin-box'] && !el['login-admin-pin-box'].hidden;
+  const rawEnteredPin = el['input-login-admin-pin'] ? el['input-login-admin-pin'].value : '';
+  const enteredAdminPin = normalizeAdminPin4(rawEnteredPin);
+  if (adminPinBoxVisible && !enteredAdminPin) {
+    el['register-error'].textContent =
+      'Ingresa tu PIN de Administrador de exactamente 4 números (ej. 2580).';
+    el['register-error'].hidden = false;
+    el['input-login-admin-pin'].focus();
     return;
   }
 
@@ -922,12 +969,14 @@ async function handleSaveWorkerRegistration(event) {
       sheetId: state.pendingCompany.sheetId || '',
       workerId: digits8,
       workerName: boundName,
+      isAdmin: false,
+      adminPin: '',
       toastMsg: `Sesión iniciada: ${boundName} (ID ${formatWorkerId8(digits8)})`
     });
     return;
   }
 
-  // Query Google Sheets ("Trabajadores" tab) to resolve frozen workerName from 8-digit ID
+  // Query Google Sheets ("Trabajadores" tab + Admin Profile) to resolve frozen workerName or Admin session
   const btn = el['btn-save-worker'];
   const origBtnText = btn.textContent;
   btn.disabled = true;
@@ -941,33 +990,72 @@ async function handleSaveWorkerRegistration(event) {
         action: 'login_worker',
         sheetId: state.pendingCompany.sheetId || '',
         workerId: digits8,
+        adminPin: enteredAdminPin,
         deviceId: device.deviceId,
         deviceLabel: device.deviceLabel
       },
       { allowNotFound: true }
     );
 
+    if (res && res.status === 'admin_pin_required') {
+      if (el['login-admin-pin-box']) {
+        el['login-admin-pin-box'].hidden = false;
+      }
+      if (el['login-admin-pin-hint']) {
+        el['login-admin-pin-hint'].textContent =
+          res.message ||
+          `ID de Administrador detectado (${res.workerName || 'Admin'}). Ingresa tu PIN de 4 números para desbloquear tus opciones de Admin y tu Checador.`;
+      }
+      if (el['input-login-admin-pin']) {
+        el['input-login-admin-pin'].focus();
+      }
+      return;
+    }
+
+    if (res && res.status === 'admin_pin_invalid') {
+      if (el['login-admin-pin-box']) {
+        el['login-admin-pin-box'].hidden = false;
+      }
+      el['register-error'].textContent =
+        res.message || 'PIN de Administrador incorrecto (debe tener exactamente 4 números).';
+      el['register-error'].hidden = false;
+      if (el['input-login-admin-pin']) {
+        el['input-login-admin-pin'].focus();
+      }
+      return;
+    }
+
     if (res && res.status === 'ok' && res.workerName) {
+      const isAdminUser = Boolean(res.isAdmin);
+      if (isAdminUser && Array.isArray(res.sheets) && res.sheets.length > 0) {
+        saveLocalAdminCatalog(state.pendingCompany.scriptId, res.sheets);
+      }
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
         orgName: state.pendingCompany.orgName,
         sheetId: state.pendingCompany.sheetId || '',
         workerId: normalizeWorkerId8(res.workerId) || digits8,
         workerName: res.workerName,
-        toastMsg: `Sesión activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
+        isAdmin: isAdminUser,
+        adminPin: isAdminUser ? enteredAdminPin : '',
+        toastMsg: isAdminUser
+          ? `Sesión de Administrador activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
+          : `Sesión activa: ${res.workerName} (ID ${formatWorkerId8(digits8)})`
       });
       return;
     }
 
-    // Fallback if this phone already knows this 8-digit ID locally
+    // Fallback if this phone already knows this 8-digit ID locally (non-Admin worker)
     const cachedName = lookupLocalWorkerName(digits8);
-    if (cachedName) {
+    if (cachedName && !digits8.startsWith('9')) {
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
         orgName: state.pendingCompany.orgName,
         sheetId: state.pendingCompany.sheetId || '',
         workerId: digits8,
         workerName: cachedName,
+        isAdmin: false,
+        adminPin: '',
         toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
       });
       return;
@@ -981,13 +1069,15 @@ async function handleSaveWorkerRegistration(event) {
     el['input-bind-worker-name'].focus();
   } catch (err) {
     const cachedName = lookupLocalWorkerName(digits8);
-    if (cachedName) {
+    if (cachedName && !digits8.startsWith('9')) {
       completeWorkerSessionLogin({
         scriptId: state.pendingCompany.scriptId,
         orgName: state.pendingCompany.orgName,
         sheetId: state.pendingCompany.sheetId || '',
         workerId: digits8,
         workerName: cachedName,
+        isAdmin: false,
+        adminPin: '',
         toastMsg: `Sesión activa: ${cachedName} (ID ${formatWorkerId8(digits8)})`
       });
       return;
@@ -1002,7 +1092,16 @@ async function handleSaveWorkerRegistration(event) {
   }
 }
 
-function completeWorkerSessionLogin({ scriptId, orgName, sheetId = '', workerId, workerName, toastMsg }) {
+function completeWorkerSessionLogin({
+  scriptId,
+  orgName,
+  sheetId = '',
+  workerId,
+  workerName,
+  isAdmin = false,
+  adminPin = '',
+  toastMsg
+}) {
   const prev = loadConfig();
   const cleanSheetId = (sheetId || '').trim();
   const isDifferentWorkerOrOrg =
@@ -1017,9 +1116,15 @@ function completeWorkerSessionLogin({ scriptId, orgName, sheetId = '', workerId,
     sheetId: cleanSheetId,
     workerId,
     workerName,
+    isAdmin: Boolean(isAdmin),
+    adminPin: isAdmin ? (adminPin || '') : '',
     privacyAccepted: true,
     configuredAt: new Date().toISOString()
   };
+
+  if (isAdmin && adminPin) {
+    state.adminPin = adminPin;
+  }
 
   saveConfig(newConfig);
 
@@ -1075,6 +1180,10 @@ function renderChecadorView() {
   if (!config) {
     switchView('welcome');
     return;
+  }
+
+  if (el['admin-checador-bar']) {
+    el['admin-checador-bar'].hidden = !config.isAdmin;
   }
 
   el['checador-org-name'].textContent = config.orgName;
@@ -1264,7 +1373,13 @@ async function sendWebhookPost(scriptId, payload, { allowNotFound = false } = {}
       );
     }
 
-    if (allowNotFound && data && data.status === 'not_found') {
+    if (
+      allowNotFound &&
+      data &&
+      (data.status === 'not_found' ||
+        data.status === 'admin_pin_required' ||
+        data.status === 'admin_pin_invalid')
+    ) {
       return data;
     }
 
@@ -1575,6 +1690,17 @@ function renderAdminSheetsCatalog() {
   }
 }
 
+function renderAdminSessionSummary(config) {
+  if (!el['admin-session-summary']) return;
+  if (!config || !config.isAdmin || !config.workerName || !config.workerId) {
+    el['admin-session-summary'].hidden = true;
+    return;
+  }
+  el['admin-summary-name'].textContent = config.workerName;
+  el['admin-summary-id'].textContent = formatWorkerId8(config.workerId);
+  el['admin-session-summary'].hidden = false;
+}
+
 async function initAdminPanel() {
   try {
     const [, gasMod] = await loadAdminModules();
@@ -1589,15 +1715,82 @@ async function initAdminPanel() {
     el['new-sheet-copy-workers'].checked = false;
   }
 
+  const existingConfig = loadConfig();
+  if (existingConfig && existingConfig.isAdmin) {
+    state.pendingAdminId = normalizeWorkerId8(existingConfig.workerId) || generateRandomAdminId8();
+    if (existingConfig.adminPin) {
+      state.adminPin = existingConfig.adminPin;
+    }
+    if (el['admin-worker-name'] && !el['admin-worker-name'].value) {
+      el['admin-worker-name'].value = existingConfig.workerName;
+    }
+    if (el['admin-org-name'] && !el['admin-org-name'].value) {
+      el['admin-org-name'].value = existingConfig.orgName;
+    }
+    if (el['admin-script-url'] && !el['admin-script-url'].value && existingConfig.scriptId) {
+      el['admin-script-url'].value = buildWebhookUrl(existingConfig.scriptId);
+    }
+    if (el['admin-pin'] && !el['admin-pin'].value && existingConfig.adminPin) {
+      el['admin-pin'].value = existingConfig.adminPin;
+    }
+    renderAdminSessionSummary(existingConfig);
+  } else {
+    if (!normalizeWorkerId8(state.pendingAdminId)) {
+      state.pendingAdminId = generateRandomAdminId8();
+    }
+    renderAdminSessionSummary(null);
+  }
+
+  if (el['admin-generated-id']) {
+    el['admin-generated-id'].textContent = formatWorkerId8(state.pendingAdminId);
+  }
+
   if (!el['admin-org-name'].value && !el['admin-script-url'].value) {
     try {
       const savedDraft = JSON.parse(sessionStorage.getItem(STORAGE_ADMIN_DRAFT_KEY) || 'null');
       if (savedDraft && savedDraft.orgName && savedDraft.scriptUrl) {
         el['admin-org-name'].value = savedDraft.orgName;
         el['admin-script-url'].value = savedDraft.scriptUrl;
+        if (savedDraft.adminName && el['admin-worker-name'] && !el['admin-worker-name'].value) {
+          el['admin-worker-name'].value = savedDraft.adminName;
+        }
+        if (savedDraft.adminId && normalizeWorkerId8(savedDraft.adminId)) {
+          state.pendingAdminId = normalizeWorkerId8(savedDraft.adminId);
+          if (el['admin-generated-id']) {
+            el['admin-generated-id'].textContent = formatWorkerId8(state.pendingAdminId);
+          }
+        }
       }
     } catch {
       // Ignore draft parse errors
+    }
+  }
+
+  // If the Admin navigated here from their Checador ("Panel de Administrador"), auto-open their QR & Catalog
+  if (!state.activeAdminAccess && existingConfig && existingConfig.isAdmin && existingConfig.scriptId) {
+    try {
+      await loadAdminModules();
+      const cachedCatalog = loadLocalAdminCatalog(existingConfig.scriptId);
+      const fallbackEntry = {
+        sheetId: existingConfig.sheetId || '',
+        orgName: existingConfig.orgName,
+        sheetUrl: '',
+        createdAt: '',
+        isPrimary: !existingConfig.sheetId
+      };
+      state.adminSheetsCatalog = cachedCatalog.length > 0 ? cachedCatalog : [fallbackEntry];
+      state.activeAdminAccess = {
+        scriptId: existingConfig.scriptId,
+        orgName: existingConfig.orgName,
+        sheetId: existingConfig.sheetId || '',
+        rawSheetId: existingConfig.sheetId || '',
+        sheetUrl: '',
+        token: '',
+        magicLink: ''
+      };
+      await setActiveAdminSheet(state.adminSheetsCatalog[0], { scrollToPoster: false });
+    } catch {
+      // Ignore auto-init errors
     }
   }
 }
@@ -1612,7 +1805,14 @@ async function handleAdminGenerate(event) {
 
   const orgName = (el['admin-org-name'].value || '').trim().replace(/\s+/g, ' ');
   const rawUrl = (el['admin-script-url'].value || '').trim();
-  const adminPin = (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : '').trim();
+  const adminName = (el['admin-worker-name'] && el['admin-worker-name'].value
+    ? el['admin-worker-name'].value
+    : ''
+  )
+    .trim()
+    .replace(/\s+/g, ' ');
+  const rawPin = (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : '').trim();
+  const adminPin = normalizeAdminPin4(rawPin);
 
   if (orgName.length < 2) {
     el['admin-form-error'].textContent = 'Escribe el nombre de la empresa (ej. Limpieza Sonora).';
@@ -1629,9 +1829,46 @@ async function handleAdminGenerate(event) {
     return;
   }
 
+  if (adminName.length < 2) {
+    el['admin-form-error'].textContent =
+      'Escribe tu nombre completo de Administrador (mínimo 2 caracteres).';
+    el['admin-form-error'].hidden = false;
+    if (el['admin-worker-name']) el['admin-worker-name'].focus();
+    return;
+  }
+
+  if (!adminPin) {
+    el['admin-form-error'].textContent =
+      'El PIN de seguridad de Administrador debe tener exactamente 4 números (ej. 2580).';
+    el['admin-form-error'].hidden = false;
+    if (el['admin-pin']) el['admin-pin'].focus();
+    return;
+  }
+
+  const adminId = normalizeWorkerId8(state.pendingAdminId) || generateRandomAdminId8();
+  state.pendingAdminId = adminId;
+  if (el['admin-generated-id']) {
+    el['admin-generated-id'].textContent = formatWorkerId8(adminId);
+  }
+
   try {
     await loadAdminModules();
     state.adminPin = adminPin;
+
+    // Save the Admin profile in browser localStorage so they also have their Checador & Admin options ready
+    const adminConfig = {
+      scriptId: parsedUrl.scriptId,
+      orgName,
+      sheetId: '',
+      workerId: adminId,
+      workerName: adminName,
+      isAdmin: true,
+      adminPin,
+      privacyAccepted: true,
+      configuredAt: new Date().toISOString()
+    };
+    saveConfig(adminConfig);
+    renderAdminSessionSummary(adminConfig);
 
     const cachedCatalog = loadLocalAdminCatalog(parsedUrl.scriptId);
     const fallbackPrimary = {
@@ -1656,29 +1893,55 @@ async function handleAdminGenerate(event) {
     try {
       sessionStorage.setItem(
         STORAGE_ADMIN_DRAFT_KEY,
-        JSON.stringify({ orgName, scriptUrl: parsedUrl.canonicalUrl })
+        JSON.stringify({
+          orgName,
+          scriptUrl: parsedUrl.canonicalUrl,
+          adminName,
+          adminId
+        })
       );
     } catch {
       // Ignore storage quota errors
     }
 
     await setActiveAdminSheet(state.adminSheetsCatalog[0], { scrollToPoster: true });
-    showToast('Código QR y perfil de administrador listos');
+    showToast(`Perfil Admin listo · ID ${formatWorkerId8(adminId)}`);
 
-    // Sync Admin Profile & Sheets Catalog with Google Apps Script in background
+    // Sync Admin Profile (ID + Name + 4-digit PIN) & Sheets Catalog with Google Apps Script
     try {
+      const device = getDeviceIdentity();
       const authRes = await sendWebhookPost(parsedUrl.scriptId, {
         action: 'admin_auth',
         orgName,
-        adminPin
+        adminId,
+        adminName,
+        adminPin,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel
       });
-      if (authRes && authRes.status === 'ok' && Array.isArray(authRes.sheets) && authRes.sheets.length > 0) {
-        state.adminSheetsCatalog = authRes.sheets;
-        saveLocalAdminCatalog(parsedUrl.scriptId, authRes.sheets);
-        await setActiveAdminSheet(authRes.sheets[0], { scrollToPoster: false });
+      if (authRes && authRes.status === 'ok') {
+        const canonicalAdminId = normalizeWorkerId8(authRes.adminId) || adminId;
+        const canonicalAdminName = authRes.adminName || adminName;
+        if (canonicalAdminId !== state.pendingAdminId || canonicalAdminName !== adminConfig.workerName) {
+          state.pendingAdminId = canonicalAdminId;
+          adminConfig.workerId = canonicalAdminId;
+          adminConfig.workerName = canonicalAdminName;
+          saveConfig(adminConfig);
+          renderAdminSessionSummary(adminConfig);
+          if (el['admin-generated-id']) {
+            el['admin-generated-id'].textContent = formatWorkerId8(canonicalAdminId);
+          }
+          if (el['admin-worker-name']) {
+            el['admin-worker-name'].value = canonicalAdminName;
+          }
+        }
+        if (Array.isArray(authRes.sheets) && authRes.sheets.length > 0) {
+          state.adminSheetsCatalog = authRes.sheets;
+          saveLocalAdminCatalog(parsedUrl.scriptId, authRes.sheets);
+          await setActiveAdminSheet(authRes.sheets[0], { scrollToPoster: false });
+        }
       }
     } catch (syncErr) {
-      // If PIN was incorrect, surface it clearly to the admin
       if (syncErr && /PIN/i.test(String(syncErr.message || ''))) {
         el['admin-form-error'].textContent = syncErr.message;
         el['admin-form-error'].hidden = false;
@@ -1700,7 +1963,12 @@ async function handleAdminCreateSheet(event) {
 
   const newOrgName = (el['new-sheet-org-name'].value || '').trim().replace(/\s+/g, ' ');
   const copyWorkers = el['new-sheet-copy-workers'].checked === true;
-  const adminPin = (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : state.adminPin || '').trim();
+  const existingConfig = loadConfig();
+  const rawPin =
+    (el['admin-pin'] && el['admin-pin'].value ? el['admin-pin'].value : '') ||
+    state.adminPin ||
+    (existingConfig && existingConfig.adminPin ? existingConfig.adminPin : '');
+  const adminPin = normalizeAdminPin4(rawPin);
 
   if (newOrgName.length < 2) {
     statusBox.className = 'alert alert-error';
@@ -1723,21 +1991,14 @@ async function handleAdminCreateSheet(event) {
     const sourceSheetId = state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId || '';
     const result = await sendWebhookPost(state.activeAdminAccess.scriptId, {
       action: 'admin_create_sheet',
+      orgName: newOrgName,
       newOrgName,
       copyWorkers,
       sourceSheetId,
       adminPin
     });
 
-    if (Array.isArray(result.sheets) && result.sheets.length > 0) {
-      state.adminSheetsCatalog = result.sheets;
-      saveLocalAdminCatalog(state.activeAdminAccess.scriptId, result.sheets);
-    } else if (result.createdSheet) {
-      state.adminSheetsCatalog.push(result.createdSheet);
-      saveLocalAdminCatalog(state.activeAdminAccess.scriptId, state.adminSheetsCatalog);
-    }
-
-    const createdEntry = result.createdSheet || {
+    const createdItem = result.createdSheet || result.newSheet || {
       sheetId: result.sheetId,
       orgName: newOrgName,
       sheetUrl: result.sheetUrl || '',
@@ -1745,7 +2006,15 @@ async function handleAdminCreateSheet(event) {
       isPrimary: false
     };
 
-    await setActiveAdminSheet(createdEntry, { scrollToPoster: true });
+    if (Array.isArray(result.sheets) && result.sheets.length > 0) {
+      state.adminSheetsCatalog = result.sheets;
+      saveLocalAdminCatalog(state.activeAdminAccess.scriptId, result.sheets);
+    } else if (createdItem && createdItem.sheetId) {
+      state.adminSheetsCatalog.push(createdItem);
+      saveLocalAdminCatalog(state.activeAdminAccess.scriptId, state.adminSheetsCatalog);
+    }
+
+    await setActiveAdminSheet(createdItem, { scrollToPoster: true });
 
     // Reset form fields and keep copyWorkers unchecked by default
     el['new-sheet-org-name'].value = '';
@@ -2051,11 +2320,57 @@ function bindEvents() {
     el['input-worker-id'].value = formatPartialWorkerIdInput(el['input-worker-id'].value);
   });
 
+  if (el['input-login-admin-pin']) {
+    el['input-login-admin-pin'].addEventListener('input', () => {
+      el['input-login-admin-pin'].value = String(el['input-login-admin-pin'].value || '')
+        .replace(/\D/g, '')
+        .slice(0, 4);
+    });
+  }
+
+  if (el['admin-pin']) {
+    el['admin-pin'].addEventListener('input', () => {
+      el['admin-pin'].value = String(el['admin-pin'].value || '')
+        .replace(/\D/g, '')
+        .slice(0, 4);
+    });
+  }
+
   el['btn-copy-register-id'].addEventListener('click', async () => {
     const formatted = formatWorkerId8(state.pendingNewWorkerId);
     await copyTextToClipboard(formatted);
     showToast(`ID ${formatted} copiado al portapapeles`);
   });
+
+  if (el['btn-copy-admin-id']) {
+    el['btn-copy-admin-id'].addEventListener('click', async () => {
+      const formatted = formatWorkerId8(state.pendingAdminId);
+      await copyTextToClipboard(formatted);
+      showToast(`ID de Admin ${formatted} copiado al portapapeles`);
+    });
+  }
+
+  if (el['btn-copy-summary-admin-id']) {
+    el['btn-copy-summary-admin-id'].addEventListener('click', async () => {
+      const config = loadConfig();
+      const idToCopy = (config && config.workerId) || state.pendingAdminId;
+      const formatted = formatWorkerId8(idToCopy);
+      await copyTextToClipboard(formatted);
+      showToast(`ID de Admin ${formatted} copiado al portapapeles`);
+    });
+  }
+
+  if (el['btn-checador-open-admin']) {
+    el['btn-checador-open-admin'].addEventListener('click', () => {
+      window.location.hash = 'admin';
+    });
+  }
+
+  if (el['btn-admin-go-checador']) {
+    el['btn-admin-go-checador'].addEventListener('click', () => {
+      exitAdminMode();
+    });
+  }
 
   el['form-worker-register'].addEventListener('submit', handleSaveWorkerRegistration);
 
