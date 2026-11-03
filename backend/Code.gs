@@ -418,6 +418,11 @@ function gestionarAutenticacionAdmin_(data, localTime) {
   const inputAdminName = String(data.adminName || "").trim().replace(/\s+/g, " ");
   const requestedAdminId = normalizarIdTrabajador8_(data.adminId);
   const primarySs = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Inicializar primero la pestaña del mes en curso para reutilizar "Hoja 1" y que nunca quede sobrando
+  const infoMesActual = resolverInfoMesDesdeFechaLocal_(localTime);
+  obtenerHojaMensualCronos_(primarySs, infoMesActual.nombreHoja);
+
   const workersSheet = obtenerHojaTrabajadoresCronos_(primarySs);
   const dir = leerDirectorioTrabajadores_(workersSheet);
 
@@ -1514,6 +1519,24 @@ function migrarHoja9a11Columnas_(sheet) {
   }
 }
 
+function limpiarHojasPorDefectoVacias_(spreadsheet) {
+  try {
+    const sheets = spreadsheet.getSheets();
+    if (sheets.length <= 1) return;
+    for (let i = sheets.length - 1; i >= 0; i--) {
+      const s = sheets[i];
+      const name = String(s.getName() || "").trim();
+      if (
+        s.getLastRow() === 0 &&
+        /^(Hoja\s*\d+|Sheet\s*\d+|Página\s*\d+)$/i.test(name) &&
+        spreadsheet.getSheets().length > 1
+      ) {
+        spreadsheet.deleteSheet(s);
+      }
+    }
+  } catch (_) {}
+}
+
 function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
   let sheet = spreadsheet.getSheetByName(nombreMesHoja);
 
@@ -1528,8 +1551,23 @@ function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
       }
     }
 
-    if (allSheets.length === 1 && allSheets[0].getLastRow() === 0 && !esHojaTrabajadoresCronos_(allSheets[0])) {
-      sheet = allSheets[0];
+    // Buscar cualquier pestaña vacía por defecto (ej. "Hoja 1" o "Sheet1") para reutilizarla
+    // incluso si la pestaña "Trabajadores" ya fue creada previamente
+    let reusableEmptySheet = null;
+    for (let i = 0; i < allSheets.length; i++) {
+      const candidate = allSheets[i];
+      if (
+        candidate.getLastRow() === 0 &&
+        !esHojaTrabajadoresCronos_(candidate) &&
+        !esHojaCronos_(candidate)
+      ) {
+        reusableEmptySheet = candidate;
+        break;
+      }
+    }
+
+    if (reusableEmptySheet) {
+      sheet = reusableEmptySheet;
       try {
         sheet.setName(nombreMesHoja);
       } catch (_) {}
@@ -1538,6 +1576,7 @@ function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
     }
 
     inicializarHojaCronos_(sheet, spreadsheet);
+    limpiarHojasPorDefectoVacias_(spreadsheet);
     return sheet;
   }
 
@@ -1552,6 +1591,7 @@ function obtenerHojaMensualCronos_(spreadsheet, nombreMesHoja) {
     }
   }
 
+  limpiarHojasPorDefectoVacias_(spreadsheet);
   return sheet;
 }
 

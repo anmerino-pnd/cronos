@@ -47,16 +47,17 @@ También puedes seguir esta misma guía interactiva directamente desde el **Pane
    * Presiona **Continuar** (o **Permitir**).
 5. **Crear tu Perfil de Administrador (ID de 8 dígitos + PIN de 4 números + Checador integrado):**
    * Copia la **URL de la aplicación web** que termina en `/exec`.
-   * Abre Cronos en modo Administrador (`/#admin` o `/admin`) y completa tu perfil:
+   * Abre Cronos en modo Administrador (`/#admin` o `/admin`, diseñado en **3 columnas** en escritorio: *1. Perfil de Administrador*, *2. Mis Hojas de Google Sheets* y *3. Código QR y Enlace Activo*) y completa tu perfil:
      * **Nombre de la empresa / hoja principal** y **URL del Apps Script (`/exec`)**.
-     * **Tu nombre completo (Administrador):** queda registrado también en la pestaña `Trabajadores` por si tú también necesitas checar Entrada/Salida.
+     * **Tu nombre completo (Administrador):** queda registrado también en la pestaña `Trabajadores` (eliminando automáticamente la `"Hoja 1"` vacía por defecto) por si tú también necesitas checar Entrada/Salida.
      * **Tu ID único de Administrador (8 dígitos, serie `9XXX-XXXX`):** nunca colisiona con los IDs de trabajadores (`1XXX-XXXX` a `8XXX-XXXX`).
      * **Tu PIN de seguridad de exactamente 4 números** (ej. `2580`).
    * Presiona **Guardar mi Perfil de Admin y Generar QR**. Tu perfil queda guardado en tu celular/navegador y te habilita un botón directo para alternar entre tu **Checador personal (Entrada / Salida)** y tu **Panel de Administrador (QR y Hojas)**.
+   * **Sincronización automática de hoja activa:** Al seleccionar cualquier hoja en la columna **Mis Hojas de Google Sheets** (o desde el selector directo en la barra superior de tu Checador), tanto el **Código QR** como **tu propio Checador** apuntan automáticamente a esa hoja seleccionada.
    * Si abres el link de la empresa en cualquier otro celular o navegador, solo toca **"Ya tengo mi ID"**, escribe tu **ID de Admin de 8 dígitos** + tu **PIN de 4 números**, y tendrás tanto tu sección de Checador como todas las herramientas de Administrador desbloqueadas.
 6. **Crear nuevas hojas de Google Sheets en 1 clic (sin volver a tocar Apps Script):**
-   * Una vez configurado tu perfil por primera vez, desde la sección **Mis Hojas de Google Sheets** en `/admin` puedes escribir el nombre de un nuevo archivo (ej. *Asistencia Limpieza 2027*), elegir opcionalmente si deseas **copiar la pestaña `Trabajadores` de la hoja actual** (desmarcado por defecto, para que tú decidas si conservar los IDs de 8 dígitos, nombres congelados e historial de celulares) y presionar **`➕ Crear nuevo Google Sheets y generar QR`**.
-   * El conector creará el nuevo archivo directamente en tu Google Drive con su pestaña mensual y directorio listos, y generará su nuevo código QR y enlace de invitación al instante.
+   * Una vez configurado tu perfil por primera vez, desde la columna **2. Mis Hojas de Google Sheets** en `/admin` puedes escribir el nombre de un nuevo archivo (ej. *Asistencia Limpieza 2027*), elegir opcionalmente si deseas **copiar la pestaña `Trabajadores` de una hoja existente** (desmarcado por defecto) y **seleccionar de cuál de tus hojas deseas copiarla** (ideal si administras dos empresas o equipos distintos).
+   * Presiona **`➕ Crear nuevo Google Sheets y generar QR`**. El conector creará el nuevo archivo directamente en tu Google Drive con su pestaña mensual y directorio listos (sin dejar `"Hoja 1"` sobrante), y actualizará tanto el código QR como tu Checador al instante.
 
 ### Pestañas Mensuales, Diseño Automático y Sello Criptográfico (`backend/Code.gs`)
 

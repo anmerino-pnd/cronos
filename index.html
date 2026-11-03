@@ -218,7 +218,7 @@
 
             <!-- Shown when the 8-digit ID belongs to the Administrator -->
             <div class="field" id="login-admin-pin-box" hidden>
-              <label class="field-label" for="input-login-admin-pin">👑 PIN de Administrador (exactamente 4 números)</label>
+              <label class="field-label" for="input-login-admin-pin">PIN de Administrador (exactamente 4 números)</label>
               <input
                 type="password"
                 id="input-login-admin-pin"
@@ -275,10 +275,16 @@
     <section class="card" id="view-checador" aria-label="Checador de asistencia" hidden>
       <!-- Admin Quick Access Bar (Visible when logged in with Admin ID) -->
       <div class="admin-checador-bar no-print" id="admin-checador-bar" hidden>
-        <span class="admin-checador-badge">👑 Perfil de Administrador</span>
-        <button type="button" class="btn btn-emerald btn-sm" id="btn-checador-open-admin">
-          Opciones de Admin / Hojas
-        </button>
+        <div class="admin-checador-bar-top">
+          <span class="admin-checador-badge">Modo Administrador</span>
+          <button type="button" class="btn btn-emerald btn-sm" id="btn-checador-open-admin">
+            Panel de Admin / Hojas
+          </button>
+        </div>
+        <div class="admin-checador-sheet-row" id="admin-checador-sheet-row" hidden>
+          <label class="admin-checador-sheet-label" for="admin-checador-sheet-select">Checar en hoja:</label>
+          <select id="admin-checador-sheet-select" class="admin-checador-select"></select>
+        </div>
       </div>
 
       <!-- Worker & Company Credential Header -->
@@ -529,29 +535,32 @@
         </div>
       </details>
 
-      <!-- Admin Generator & Output Grid -->
+      <!-- Admin 3-Column Grid: 1) Perfil & Conector, 2) Mis Hojas, 3) Cartel QR & Enlace -->
       <div class="admin-grid" id="admin-grid">
-        <!-- Form & Admin Profile Column -->
+        <!-- COLUMN 1: Admin Profile & Connector Form -->
         <div class="card no-print" id="admin-form-card">
           <div class="card-body">
-            <h2 class="view-title" style="font-size: 1.2rem; margin-bottom: 0.35rem;">Crear o Conectar Perfil de Administrador</h2>
-            <p class="view-lead" style="font-size: 0.86rem; margin-bottom: 0.95rem;">
-              Crea tu perfil con tu nombre, tu <strong>ID único de Admin (8 dígitos)</strong> y un <strong>PIN de 4 números</strong>. Así podrás abrir cualquier link de tu empresa, entrar en <em>"Ya tengo mi ID"</em> y tener disponibles tanto tus opciones de Admin como tu propio Checador.
+            <h2 class="view-title" style="font-size: 1.15rem; margin-bottom: 0.35rem;">1. Perfil de Administrador</h2>
+            <p class="view-lead" style="font-size: 0.84rem; margin-bottom: 0.9rem;">
+              Crea tu perfil con tu nombre, tu <strong>ID único de Admin (8 dígitos)</strong> y un <strong>PIN de 4 números</strong>. Así podrás entrar en <em>"Ya tengo mi ID"</em> desde cualquier dispositivo y usar tanto tus opciones de Admin como tu Checador.
             </p>
 
             <!-- Active Admin Session Shortcut to Checador -->
             <div class="admin-session-summary" id="admin-session-summary" hidden>
               <div class="admin-session-summary-top">
                 <span class="admin-session-summary-who">
-                  👑 <strong id="admin-summary-name">—</strong> · ID <code id="admin-summary-id">----</code>
+                  <strong id="admin-summary-name">—</strong> · ID <code id="admin-summary-id">----</code>
                 </span>
                 <button type="button" class="btn-copy-chip" id="btn-copy-summary-admin-id">
                   Copiar ID
                 </button>
               </div>
               <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-admin-go-checador">
-                ⏱️ Ir a mi sección de Checador (Registrar mi Entrada / Salida)
+                ⏱️ Ir a mi Checador en: <span id="admin-go-checador-sheet-name">Hoja activa</span>
               </button>
+              <p class="admin-session-summary-hint">
+                Al seleccionar otra hoja en la columna <strong>Mis Hojas</strong>, tu Checador cambia automáticamente a esa hoja.
+              </p>
             </div>
 
             <div class="alert alert-error" id="admin-form-error" role="alert" hidden></div>
@@ -627,61 +636,75 @@
                 Guardar Perfil de Admin y Generar QR
               </button>
             </form>
+          </div>
+        </div>
 
-            <!-- Admin Profile: Catalog of Sheets + 1-Click New Sheet Creator -->
-            <div class="admin-sheets-panel" id="admin-sheets-panel" hidden>
-              <div class="admin-sheets-header">
-                <span class="admin-sheets-title">Mis Hojas de Google Sheets</span>
-                <span class="admin-sheets-badge" id="admin-sheets-count-badge">1 hoja</span>
-              </div>
+        <!-- COLUMN 2: Catalog of Sheets + 1-Click New Sheet Creator -->
+        <div class="card no-print" id="admin-sheets-panel" hidden>
+          <div class="card-body">
+            <div class="admin-sheets-header">
+              <h2 class="view-title" style="font-size: 1.15rem; margin-bottom: 0;">2. Mis Hojas de Google Sheets</h2>
+              <span class="admin-sheets-badge" id="admin-sheets-count-badge">1 hoja</span>
+            </div>
+            <p class="view-lead" style="font-size: 0.83rem; margin-bottom: 0.85rem;">
+              Toca cualquier hoja para mostrar su QR en la columna derecha y usarla como tu hoja activa al ir a tu Checador.
+            </p>
 
-              <div class="admin-sheets-list" id="admin-sheets-list" role="list"></div>
+            <div class="admin-sheets-list" id="admin-sheets-list" role="list"></div>
 
-              <div class="admin-create-sheet-box">
-                <h3 class="admin-create-sheet-title">➕ Crear nueva hoja de Google Sheets en 1 clic</h3>
-                <p class="admin-create-sheet-desc">
-                  Crea un nuevo archivo en tu Google Drive ya vinculado a este mismo conector y genera su código QR al instante (ideal para cambiar de año o abrir otra sucursal).
-                </p>
+            <div class="admin-create-sheet-box">
+              <h3 class="admin-create-sheet-title">➕ Crear nueva hoja en 1 clic</h3>
+              <p class="admin-create-sheet-desc">
+                Crea un nuevo archivo en tu Google Drive vinculado a este mismo conector y genera su código QR al instante (ideal para cambiar de año o abrir otra sucursal/empresa).
+              </p>
 
-                <div class="alert" id="admin-create-sheet-status" role="status" aria-live="polite" hidden></div>
+              <div class="alert" id="admin-create-sheet-status" role="status" aria-live="polite" hidden></div>
 
-                <form id="form-admin-create-sheet" novalidate>
-                  <div class="field" style="margin-bottom: 0.7rem;">
-                    <label class="field-label" for="new-sheet-org-name">Nombre del nuevo Google Sheets</label>
-                    <input
-                      type="text"
-                      id="new-sheet-org-name"
-                      class="input-text"
-                      placeholder="Ej. Asistencia Limpieza 2027"
-                      maxlength="60"
-                      required
-                    >
-                  </div>
+              <form id="form-admin-create-sheet" novalidate>
+                <div class="field" style="margin-bottom: 0.7rem;">
+                  <label class="field-label" for="new-sheet-org-name">Nombre del nuevo Google Sheets</label>
+                  <input
+                    type="text"
+                    id="new-sheet-org-name"
+                    class="input-text"
+                    placeholder="Ej. Asistencia Limpieza 2027"
+                    maxlength="60"
+                    required
+                  >
+                </div>
 
-                  <label class="admin-checkbox-row" for="new-sheet-copy-workers">
-                    <input
-                      type="checkbox"
-                      id="new-sheet-copy-workers"
-                      class="admin-checkbox-input"
-                    >
-                    <span class="admin-checkbox-copy">
-                      <strong>Copiar la pestaña "Trabajadores" de la hoja actual</strong>
-                      <span>Conserva los IDs de 8 dígitos, nombres congelados e historial de celulares en la nueva hoja para que tu equipo no tenga que registrarse de cero.</span>
-                    </span>
-                  </label>
+                <label class="admin-checkbox-row" for="new-sheet-copy-workers">
+                  <input
+                    type="checkbox"
+                    id="new-sheet-copy-workers"
+                    class="admin-checkbox-input"
+                  >
+                  <span class="admin-checkbox-copy">
+                    <strong>Copiar la pestaña "Trabajadores" de una hoja existente</strong>
+                    <span>Conserva los IDs de 8 dígitos, nombres congelados e historial de celulares en la nueva hoja para que ese equipo no tenga que registrarse de cero.</span>
+                  </span>
+                </label>
 
-                  <button type="submit" class="btn btn-primary btn-block" id="btn-create-new-sheet">
-                    ➕ Crear nuevo Google Sheets y generar QR
-                  </button>
-                </form>
-              </div>
+                <div class="field admin-source-sheet-box" id="new-sheet-source-box" hidden>
+                  <label class="field-label" for="new-sheet-source-select">¿De cuál hoja deseas copiar la lista de Trabajadores?</label>
+                  <select id="new-sheet-source-select" class="input-text"></select>
+                  <p class="field-hint">
+                    Elige la empresa u hoja cuyos trabajadores quieres migrar al nuevo archivo.
+                  </p>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block" id="btn-create-new-sheet">
+                  ➕ Crear nuevo Google Sheets y generar QR
+                </button>
+              </form>
             </div>
           </div>
         </div>
 
-        <!-- Output Column (QR Poster + Magic Link + Connection Test) -->
+        <!-- COLUMN 3: Output Column (QR Poster + Magic Link + Connection Test) -->
         <div class="card" id="admin-output-card" hidden>
           <div class="card-body">
+            <h2 class="view-title no-print" style="font-size: 1.15rem; margin-bottom: 0.75rem;">3. Código QR y Enlace Activo</h2>
             <!-- Printable Wall Poster -->
             <div class="poster-card" id="printable-poster">
               <div class="poster-header">

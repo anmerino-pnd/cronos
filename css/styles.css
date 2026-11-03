@@ -230,7 +230,7 @@ textarea {
 }
 
 .app-main.is-wide {
-  max-width: 980px;
+  max-width: 1320px;
 }
 
 /* Timecard Surface */
@@ -1062,13 +1062,19 @@ textarea {
 .admin-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.25rem;
+  gap: 1.15rem;
   align-items: start;
 }
 
-@media (min-width: 820px) {
+@media (min-width: 780px) and (max-width: 1059px) {
   .admin-grid.has-output {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1060px) {
+  .admin-grid.has-output {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1220,20 +1226,57 @@ textarea {
 
 .admin-checador-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
+  flex-direction: column;
+  gap: 0.55rem;
   padding: 0.7rem 1.25rem;
   background-color: #ECFDF5;
   border-bottom: 1.5px solid #A7F3D0;
+}
+
+.admin-checador-bar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
   flex-wrap: wrap;
 }
 
 .admin-checador-badge {
   font-family: var(--font-display);
-  font-size: 0.84rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #065F46;
+}
+
+.admin-checador-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed #A7F3D0;
+}
+
+.admin-checador-sheet-label {
+  font-size: 0.78rem;
   font-weight: 700;
   color: #065F46;
+  white-space: nowrap;
+}
+
+.admin-checador-select {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0.25rem 0.55rem;
+  border-radius: 7px;
+  border: 1.5px solid #6EE7B7;
+  background-color: #FFFFFF;
+  color: #064E3B;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
 }
 
 .admin-session-summary {
@@ -1244,7 +1287,7 @@ textarea {
   background-color: #ECFDF5;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 
 .admin-session-summary-top {
@@ -1268,6 +1311,13 @@ textarea {
   border-radius: 5px;
   border: 1px solid #A7F3D0;
   color: #065F46;
+}
+
+.admin-session-summary-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #047857;
+  line-height: 1.38;
 }
 
 .code-toolbar {
@@ -1367,21 +1417,13 @@ textarea {
   border-top: 1.5px dashed var(--border-strong);
 }
 
-/* Admin Profile Catalog & 1-Click Sheet Creator */
-.admin-sheets-panel {
-  margin-top: 1.35rem;
-  padding-top: 1.2rem;
-  border-top: 1.5px dashed var(--border-strong);
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
+/* Admin Profile Catalog & 1-Click Sheet Creator (Column 2) */
 .admin-sheets-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  margin-bottom: 0.3rem;
 }
 
 .admin-sheets-title {
@@ -1406,6 +1448,15 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.admin-source-sheet-box {
+  margin-bottom: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  background-color: #FFFFFF;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
 }
 
 .admin-sheet-item {

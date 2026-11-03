@@ -76,6 +76,7 @@ function cacheElements() {
     'input-privacy-accept', 'btn-save-worker', 'btn-cancel-register',
     // View 3: Checador
     'view-checador', 'admin-checador-bar', 'btn-checador-open-admin',
+    'admin-checador-sheet-row', 'admin-checador-sheet-select',
     'checador-org-name', 'checador-worker-name',
     'checador-worker-id', 'btn-copy-worker-id', 'worker-id-copy-tag',
     'btn-card-options',
@@ -89,13 +90,15 @@ function cacheElements() {
     // View 4: Admin
     'view-admin', 'admin-setup-guide', 'btn-copy-gas', 'gas-code-preview',
     'admin-grid', 'admin-form-card', 'admin-session-summary',
-    'admin-summary-name', 'admin-summary-id', 'btn-copy-summary-admin-id', 'btn-admin-go-checador',
+    'admin-summary-name', 'admin-summary-id', 'btn-copy-summary-admin-id',
+    'btn-admin-go-checador', 'admin-go-checador-sheet-name',
     'admin-form-error', 'form-admin-generate',
     'admin-worker-name', 'admin-generated-id', 'btn-copy-admin-id',
     'admin-org-name', 'admin-script-url', 'admin-pin', 'btn-generate-access',
     'admin-sheets-panel', 'admin-sheets-count-badge', 'admin-sheets-list',
     'admin-create-sheet-status', 'form-admin-create-sheet', 'new-sheet-org-name',
-    'new-sheet-copy-workers', 'btn-create-new-sheet',
+    'new-sheet-copy-workers', 'new-sheet-source-box', 'new-sheet-source-select',
+    'btn-create-new-sheet',
     'admin-output-card', 'poster-org-title', 'admin-qr-canvas',
     'btn-open-active-sheet', 'admin-magic-link', 'btn-copy-magic-link', 'btn-share-whatsapp',
     'btn-download-qr', 'btn-print-qr', 'btn-test-connection', 'test-connection-result',
@@ -1184,6 +1187,35 @@ function renderChecadorView() {
 
   if (el['admin-checador-bar']) {
     el['admin-checador-bar'].hidden = !config.isAdmin;
+    if (config.isAdmin && el['admin-checador-sheet-row'] && el['admin-checador-sheet-select']) {
+      const catalog = loadLocalAdminCatalog(config.scriptId);
+      if (catalog.length >= 2) {
+        el['admin-checador-sheet-row'].hidden = false;
+        const selectEl = el['admin-checador-sheet-select'];
+        selectEl.innerHTML = '';
+        for (const item of catalog) {
+          const opt = document.createElement('option');
+          const itemSid = item.isPrimary ? '' : (item.sheetId || '').trim();
+          opt.value = JSON.stringify({
+            sheetId: itemSid,
+            rawSheetId: (item.sheetId || '').trim(),
+            orgName: item.orgName
+          });
+          opt.textContent = `${item.orgName} (${item.isPrimary ? 'Principal' : 'Adicional'})`;
+          const isMatch =
+            (config.sheetId && item.sheetId === config.sheetId) ||
+            (!config.sheetId && (item.isPrimary || item.orgName === config.orgName));
+          if (isMatch) {
+            opt.selected = true;
+          }
+          selectEl.appendChild(opt);
+        }
+      } else {
+        el['admin-checador-sheet-row'].hidden = true;
+      }
+    } else if (el['admin-checador-sheet-row']) {
+      el['admin-checador-sheet-row'].hidden = true;
+    }
   }
 
   el['checador-org-name'].textContent = config.orgName;
@@ -1598,6 +1630,23 @@ async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false } = {}) 
     magicLink
   };
 
+  // Automatically sync the Admin's personal Checador config to the selected sheet
+  // so clicking "Ir a mi Checador" punches into whichever sheet is currently selected in "Mis Hojas"
+  const existingConfig = loadConfig();
+  if (existingConfig && existingConfig.isAdmin && existingConfig.scriptId === scriptId) {
+    const changedSheet =
+      (existingConfig.sheetId || '') !== sheetId || existingConfig.orgName !== orgName;
+    existingConfig.orgName = orgName;
+    existingConfig.sheetId = sheetId;
+    saveConfig(existingConfig);
+    if (changedSheet) {
+      localStorage.removeItem(STORAGE_LAST_CHECKIN_KEY);
+    }
+    renderAdminSessionSummary(existingConfig);
+  } else if (el['admin-go-checador-sheet-name']) {
+    el['admin-go-checador-sheet-name'].textContent = orgName;
+  }
+
   el['poster-org-title'].textContent = orgName;
   el['admin-magic-link'].value = magicLink;
 
@@ -1620,9 +1669,41 @@ async function setActiveAdminSheet(sheetEntry, { scrollToPoster = false } = {}) 
 
   renderAdminSheetsCatalog();
 
-  if (scrollToPoster) {
+  if (scrollToPoster && window.innerWidth < 1060) {
     el['admin-output-card'].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
+}
+
+function renderAdminSourceSheetSelect(sheets, activeRawSid, activeOrg) {
+  const selectEl = el['new-sheet-source-select'];
+  if (!selectEl) return;
+
+  const prevSelected = selectEl.value;
+  selectEl.innerHTML = '';
+
+  let matchedPrev = false;
+  let activeDefaultValue = '';
+
+  for (const item of sheets) {
+    const opt = document.createElement('option');
+    const val = item.isPrimary ? '' : (item.sheetId || '').trim();
+    opt.value = val;
+    const roleTag = item.isPrimary ? 'Hoja principal' : 'Hoja adicional';
+    opt.textContent = `${item.orgName} (${roleTag})`;
+    selectEl.appendChild(opt);
+
+    if (prevSelected && val === prevSelected) {
+      matchedPrev = true;
+    }
+    const isCurrent =
+      (activeRawSid && item.sheetId === activeRawSid) ||
+      (!activeRawSid && item.orgName === activeOrg);
+    if (isCurrent) {
+      activeDefaultValue = val;
+    }
+  }
+
+  selectEl.value = matchedPrev ? prevSelected : activeDefaultValue;
 }
 
 function renderAdminSheetsCatalog() {
@@ -1665,13 +1746,13 @@ function renderAdminSheetsCatalog() {
     metaSpan.className = 'admin-sheet-meta';
     const roleTag = item.isPrimary ? 'Hoja principal' : 'Hoja adicional';
     const dateTag = item.createdAt ? ` · ${item.createdAt}` : '';
-    metaSpan.textContent = `${roleTag}${dateTag} · Ver QR`;
+    metaSpan.textContent = `${roleTag}${dateTag} · QR y Checador`;
 
     selectBtn.appendChild(nameSpan);
     selectBtn.appendChild(metaSpan);
     selectBtn.addEventListener('click', () => {
       setActiveAdminSheet(item, { scrollToPoster: false });
-      showToast(`QR activo: ${item.orgName}`);
+      showToast(`Hoja activa (QR y Checador): ${item.orgName}`);
     });
 
     row.appendChild(selectBtn);
@@ -1688,6 +1769,8 @@ function renderAdminSheetsCatalog() {
 
     listEl.appendChild(row);
   }
+
+  renderAdminSourceSheetSelect(sheets, activeRawSid, activeOrg);
 }
 
 function renderAdminSessionSummary(config) {
@@ -1698,7 +1781,23 @@ function renderAdminSessionSummary(config) {
   }
   el['admin-summary-name'].textContent = config.workerName;
   el['admin-summary-id'].textContent = formatWorkerId8(config.workerId);
+  if (el['admin-go-checador-sheet-name']) {
+    el['admin-go-checador-sheet-name'].textContent = config.orgName || 'Hoja activa';
+  }
   el['admin-session-summary'].hidden = false;
+}
+
+function findMatchingSheetEntry(catalog, targetSheetId, targetOrgName) {
+  if (!Array.isArray(catalog) || catalog.length === 0) return null;
+  if (targetSheetId) {
+    const byId = catalog.find((s) => s.sheetId === targetSheetId);
+    if (byId) return byId;
+  }
+  if (targetOrgName) {
+    const byName = catalog.find((s) => s.orgName === targetOrgName);
+    if (byName) return byName;
+  }
+  return catalog[0];
 }
 
 async function initAdminPanel() {
@@ -1710,9 +1809,12 @@ async function initAdminPanel() {
       '// Revisa el archivo backend/Code.gs o el README.md para copiar el código.';
   }
 
-  // Ensure copyWorkers checkbox is always unchecked by default
+  // Ensure copyWorkers checkbox and source selector are reset by default
   if (el['new-sheet-copy-workers']) {
     el['new-sheet-copy-workers'].checked = false;
+  }
+  if (el['new-sheet-source-box']) {
+    el['new-sheet-source-box'].hidden = true;
   }
 
   const existingConfig = loadConfig();
@@ -1725,7 +1827,9 @@ async function initAdminPanel() {
       el['admin-worker-name'].value = existingConfig.workerName;
     }
     if (el['admin-org-name'] && !el['admin-org-name'].value) {
-      el['admin-org-name'].value = existingConfig.orgName;
+      const cat = loadLocalAdminCatalog(existingConfig.scriptId);
+      const primaryItem = cat.find((s) => s.isPrimary) || cat[0];
+      el['admin-org-name'].value = (primaryItem && primaryItem.orgName) || existingConfig.orgName;
     }
     if (el['admin-script-url'] && !el['admin-script-url'].value && existingConfig.scriptId) {
       el['admin-script-url'].value = buildWebhookUrl(existingConfig.scriptId);
@@ -1766,7 +1870,8 @@ async function initAdminPanel() {
     }
   }
 
-  // If the Admin navigated here from their Checador ("Panel de Administrador"), auto-open their QR & Catalog
+  // If the Admin navigated here from their Checador ("Panel de Admin / Hojas"), auto-open their QR & Catalog
+  // preserving whichever sheet was currently selected in their Checador!
   if (!state.activeAdminAccess && existingConfig && existingConfig.isAdmin && existingConfig.scriptId) {
     try {
       await loadAdminModules();
@@ -1788,7 +1893,12 @@ async function initAdminPanel() {
         token: '',
         magicLink: ''
       };
-      await setActiveAdminSheet(state.adminSheetsCatalog[0], { scrollToPoster: false });
+      const matchedEntry = findMatchingSheetEntry(
+        state.adminSheetsCatalog,
+        existingConfig.sheetId,
+        existingConfig.orgName
+      );
+      await setActiveAdminSheet(matchedEntry, { scrollToPoster: false });
     } catch {
       // Ignore auto-init errors
     }
@@ -1855,11 +1965,20 @@ async function handleAdminGenerate(event) {
     await loadAdminModules();
     state.adminPin = adminPin;
 
+    const prevSelectedSheetId =
+      state.activeAdminAccess && state.activeAdminAccess.scriptId === parsedUrl.scriptId
+        ? state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId || ''
+        : '';
+    const prevSelectedOrg =
+      state.activeAdminAccess && state.activeAdminAccess.scriptId === parsedUrl.scriptId
+        ? state.activeAdminAccess.orgName || orgName
+        : orgName;
+
     // Save the Admin profile in browser localStorage so they also have their Checador & Admin options ready
     const adminConfig = {
       scriptId: parsedUrl.scriptId,
-      orgName,
-      sheetId: '',
+      orgName: prevSelectedOrg,
+      sheetId: prevSelectedSheetId,
       workerId: adminId,
       workerName: adminName,
       isAdmin: true,
@@ -1882,9 +2001,9 @@ async function handleAdminGenerate(event) {
     state.adminSheetsCatalog = cachedCatalog.length > 0 ? cachedCatalog : [fallbackPrimary];
     state.activeAdminAccess = {
       scriptId: parsedUrl.scriptId,
-      orgName,
-      sheetId: '',
-      rawSheetId: '',
+      orgName: prevSelectedOrg,
+      sheetId: prevSelectedSheetId,
+      rawSheetId: prevSelectedSheetId,
       sheetUrl: '',
       token: '',
       magicLink: ''
@@ -1904,7 +2023,12 @@ async function handleAdminGenerate(event) {
       // Ignore storage quota errors
     }
 
-    await setActiveAdminSheet(state.adminSheetsCatalog[0], { scrollToPoster: true });
+    const initialTarget = findMatchingSheetEntry(
+      state.adminSheetsCatalog,
+      prevSelectedSheetId,
+      prevSelectedOrg
+    );
+    await setActiveAdminSheet(initialTarget, { scrollToPoster: true });
     showToast(`Perfil Admin listo · ID ${formatWorkerId8(adminId)}`);
 
     // Sync Admin Profile (ID + Name + 4-digit PIN) & Sheets Catalog with Google Apps Script
@@ -1938,7 +2062,12 @@ async function handleAdminGenerate(event) {
         if (Array.isArray(authRes.sheets) && authRes.sheets.length > 0) {
           state.adminSheetsCatalog = authRes.sheets;
           saveLocalAdminCatalog(parsedUrl.scriptId, authRes.sheets);
-          await setActiveAdminSheet(authRes.sheets[0], { scrollToPoster: false });
+          const refreshedTarget = findMatchingSheetEntry(
+            authRes.sheets,
+            state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId,
+            state.activeAdminAccess.orgName
+          );
+          await setActiveAdminSheet(refreshedTarget, { scrollToPoster: false });
         }
       }
     } catch (syncErr) {
@@ -1988,13 +2117,21 @@ async function handleAdminCreateSheet(event) {
   statusBox.hidden = false;
 
   try {
-    const sourceSheetId = state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId || '';
+    const selectedSourceSid =
+      copyWorkers && el['new-sheet-source-select']
+        ? String(el['new-sheet-source-select'].value || '').trim()
+        : state.activeAdminAccess.rawSheetId || state.activeAdminAccess.sheetId || '';
+    const sourceEntry = (state.adminSheetsCatalog || []).find((s) =>
+      selectedSourceSid ? s.sheetId === selectedSourceSid : s.isPrimary
+    );
+    const sourceLabel = sourceEntry ? sourceEntry.orgName : state.activeAdminAccess.orgName;
+
     const result = await sendWebhookPost(state.activeAdminAccess.scriptId, {
       action: 'admin_create_sheet',
       orgName: newOrgName,
       newOrgName,
       copyWorkers,
-      sourceSheetId,
+      sourceSheetId: selectedSourceSid,
       adminPin
     });
 
@@ -2019,16 +2156,19 @@ async function handleAdminCreateSheet(event) {
     // Reset form fields and keep copyWorkers unchecked by default
     el['new-sheet-org-name'].value = '';
     el['new-sheet-copy-workers'].checked = false;
+    if (el['new-sheet-source-box']) {
+      el['new-sheet-source-box'].hidden = true;
+    }
 
     const workersNote = copyWorkers
-      ? ` Se copiaron ${result.copiedWorkersCount || 0} trabajador(es) con sus IDs y celulares.`
+      ? ` Se copiaron ${result.copiedWorkersCount || 0} trabajador(es) desde "${sourceLabel}".`
       : ' Se creó con la pestaña Trabajadores limpia.';
 
     statusBox.className = 'alert alert-success';
-    statusBox.textContent = `¡Hoja "${newOrgName}" creada en tu Google Drive!${workersNote} El código QR y Magic Link de la derecha ya apuntan a esta nueva hoja.`;
+    statusBox.textContent = `¡Hoja "${newOrgName}" creada en tu Google Drive!${workersNote} El código QR y tu Checador ya apuntan a esta nueva hoja.`;
     statusBox.hidden = false;
 
-    showToast(`Nueva hoja creada: ${newOrgName}`, 3400);
+    showToast(`Nueva hoja activa: ${newOrgName}`, 3400);
   } catch (err) {
     statusBox.className = 'alert alert-error';
     statusBox.textContent =
@@ -2366,9 +2506,51 @@ function bindEvents() {
     });
   }
 
+  if (el['admin-checador-sheet-select']) {
+    el['admin-checador-sheet-select'].addEventListener('change', () => {
+      const config = loadConfig();
+      if (!config || !config.isAdmin) return;
+      try {
+        const picked = JSON.parse(el['admin-checador-sheet-select'].value);
+        if (!picked || !picked.orgName) return;
+        const nextSheetId = picked.sheetId || '';
+        const changed =
+          (config.sheetId || '') !== nextSheetId || config.orgName !== picked.orgName;
+        config.orgName = picked.orgName;
+        config.sheetId = nextSheetId;
+        saveConfig(config);
+        if (changed) {
+          localStorage.removeItem(STORAGE_LAST_CHECKIN_KEY);
+        }
+        if (state.activeAdminAccess && state.activeAdminAccess.scriptId === config.scriptId) {
+          const matched = findMatchingSheetEntry(
+            state.adminSheetsCatalog,
+            picked.rawSheetId || nextSheetId,
+            picked.orgName
+          );
+          if (matched) {
+            setActiveAdminSheet(matched, { scrollToPoster: false });
+          }
+        }
+        renderChecadorView();
+        showToast(`Checador activo en: ${picked.orgName}`);
+      } catch {
+        // Ignore parse error
+      }
+    });
+  }
+
   if (el['btn-admin-go-checador']) {
     el['btn-admin-go-checador'].addEventListener('click', () => {
       exitAdminMode();
+    });
+  }
+
+  if (el['new-sheet-copy-workers']) {
+    el['new-sheet-copy-workers'].addEventListener('change', () => {
+      if (el['new-sheet-source-box']) {
+        el['new-sheet-source-box'].hidden = !el['new-sheet-copy-workers'].checked;
+      }
     });
   }
 

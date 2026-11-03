@@ -1,209 +1,117 @@
-# Especificación Técnica (MVP - Etapa 1): Checador PWA Serverless
+# Especificación Técnica y Hoja de Ruta: Cronos · Checador PWA Serverless
 
 ## 1. Visión General del Proyecto
-Aplicación Web Progresiva (PWA) de uso libre y código abierto diseñada para el registro de asistencia y geolocalización (Entrada/Salida) de trabajadores en campo (ej. PyMEs de limpieza). 
+Aplicación Web Progresiva (**PWA**) de uso libre y código abierto diseñada para el registro de asistencia (**Entrada / Salida**), auditoría de dispositivos y geolocalización GPS verificada con hora oficial de servidor para equipos de trabajo en campo (ej. PyMEs de limpieza, mantenimiento, construcción, seguridad o supervisión de rutas).
 
-* **Costo de infraestructura:** $0 USD (100% Serverless).
-* **Alojamiento Frontend:** GitHub Pages / Cloudflare Pages / Vercel.
-* **Base de Datos y Backend:** Google Sheets + Google Apps Script (propiedad de cada administrador).
-* **Plataformas soportadas:** Android y iOS vía navegador web e instalación en pantalla de inicio.
+* **Costo de infraestructura:** `$0 USD` (100% Serverless, sin servidores intermedios ni suscripciones).
+* **Alojamiento Frontend:** GitHub Pages / Cloudflare Pages / Vercel (Arquitectura *0-Build* en HTML5 + CSS3 + Vanilla JS ES2022).
+* **Base de Datos y Backend:** Google Sheets + Google Apps Script (propiedad privada 100% en el Google Drive de cada administrador).
+* **Plataformas soportadas:** Android y iOS vía navegador web e instalación directa en pantalla de inicio.
 
 ---
 
 ## 2. Arquitectura del Sistema y Flujo de Datos
 
-El sistema opera sin una base de datos centralizada intermedia. La vinculación entre los trabajadores y la hoja de cálculo de la empresa se realiza codificando el identificador del webhook de Google Apps Script en un **Código QR** y/o **Magic Link** (URL con parámetros).
+El sistema opera sin una base de datos centralizada intermedia. La vinculación entre los trabajadores y las hojas de cálculo de la empresa se realiza codificando el identificador del webhook de Google Apps Script (`scriptId`), el nombre de la empresa/hoja (`org`) y opcionalmente el identificador del archivo de Google Sheets secundario (`sid`) en un **Código QR** y/o **Magic Link** (`?join=<BASE64URL_TOKEN>`).
 
 ### 2.1 Empaquetado de Configuración (Token de Empresa)
-Para evitar códigos QR densos o URLs demasiado largas, la aplicación extrae únicamente el `SCRIPT_ID` de la URL generada por Google Apps Script:
 * **URL original de Google:** `https://script.google.com/macros/s/{SCRIPT_ID}/exec`
-* **JSON de configuración:**
+* **JSON de configuración (Hoja principal):**
   ```json
   {
     "id": "AKfycbx...",
     "org": "Limpieza HMO"
   }
   ```
-* **Token generado:** El JSON se convierte a `Base64` (URL-safe) y se distribuye de dos formas:
-  1. **Código QR:** Renderizado en la vista del Administrador para escaneo presencial.
-  2. **Magic Link (WhatsApp):** `https://<dominio-app>/?join=<BASE64_TOKEN>` para configuración remota en un clic.
-
----
-
-## 3. Flujos de Usuario (UX/UI)
-
-### 3.1 Vista de Administrador (`/admin` o pestaña de Configuración)
-1. **Formulario de creación:**
-   * Campo: *Nombre de la Empresa* (ej. `Limpieza Sonora`).
-   * Campo: *URL del Web App de Google Apps Script*.
-2. **Validación:** Al presionar "Generar Acceso", la app verifica que la URL tenga el formato válido de `script.google.com/macros/s/.../exec` y opcionalmente envía un `ping` de prueba.
-3. **Salida:**
-   * Muestra el **Código QR** listo para escanear o imprimir.
-   * Botón **"Copiar enlace de invitación (WhatsApp)"** con el Magic Link.
-   * Botón **"Probar conexión"** que inserta una fila de prueba en el Google Sheets.
-
-### 3.2 Vista de Trabajador - Onboarding (Primera vez)
-1. **Detección de invitación:**
-   * Si el usuario entra mediante un **Magic Link** (`?join=...`), la app decodifica el token automáticamente y salta al paso 2.
-   * Si entra a la URL raíz sin configuración previa, muestra las opciones: **"Escanear QR de mi empresa"** (usando la cámara del dispositivo) o **"Pegar código de invitación"**.
-2. **Registro local del empleado:**
-   * Muestra el nombre de la empresa detectada (ej. *"Te estás uniendo a: Limpieza HMO"*).
-   * Campo de texto: *Nombre completo del trabajador*.
-   * Casilla de verificación obligatoria: *Aceptación de aviso de privacidad (uso de ubicación únicamente al momento de presionar el botón de registro)*.
-   * Al guardar, se almacena en `localStorage` y se limpia el parámetro `?join=` de la URL.
-3. **Banner de instalación (PWA):**
-   * En Android: Botón nativo para instalar app (`beforeinstallprompt`).
-   * En iOS: Instrucción visual breve (*"Para no perder tu sesión, toca Compartir > Agregar a inicio"*).
-
-### 3.3 Vista de Trabajador - Checador (Uso Diario)
-Pantalla minimalista de alto contraste pensada para uso rápido:
-1. **Encabezado:** Nombre de la empresa y nombre del trabajador (con un botón discreto de "Cambiar usuario / Salir").
-2. **Acciones principales:**
-   * Botón grande verde: **REGISTRAR ENTRADA**
-   * Botón grande azul/ámbar: **REGISTRAR SALIDA**
-3. **Flujo al presionar un botón:**
-   * Estado de carga: *"Obteniendo ubicación GPS..."* (solicita permisos de `navigator.geolocation.getCurrentPosition` con `enableHighAccuracy: true`).
-   * Estado de envío: *"Enviando registro..."*
-   * Confirmación visual clara (pantalla completa o modal): *"¡Entrada registrada con éxito a las 08:02 AM!"* mostrando la hora oficial devuelta por el servidor de Google.
-
----
-
-## 4. Especificación de Datos y API
-
-### 4.1 Almacenamiento Local (`localStorage`)
-```json
-{
-  "checador_config": {
-    "scriptId": "AKfycbx...",
-    "orgName": "Limpieza HMO",
-    "workerName": "Juan Pérez",
-    "privacyAccepted": true,
-    "configuredAt": "2026-10-29T17:00:00.000Z"
-  },
-  "last_checkin": {
-    "type": "ENTRADA",
-    "serverTime": "2026-10-29 08:01:22"
-  }
-}
-```
-
-### 4.2 Petición HTTP (Frontend -> Google Apps Script)
-* **Método:** `POST`
-* **URL:** `https://script.google.com/macros/s/{scriptId}/exec`
-* **Headers:** `Content-Type: text/plain;charset=utf-8` *(Importante: Se usa `text/plain` deliberadamente para evitar el bloqueo de preflight `OPTIONS` por políticas CORS de Google Apps Script).*
-* **Payload (Body JSON serializado como texto):**
+* **JSON de configuración (Hoja adicional creada en 1 clic desde el panel Admin):**
   ```json
   {
-    "workerName": "Juan Pérez",
-    "type": "ENTRADA",
-    "lat": 29.072967,
-    "lng": -110.955919,
-    "accuracy": 14.5
+    "id": "AKfycbx...",
+    "org": "Asistencia Limpieza 2027",
+    "sid": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
   }
   ```
 
-### 4.3 Respuesta HTTP (Google Apps Script -> Frontend)
-```json
-{
-  "status": "ok",
-  "localTime": "2026-10-29 08:01:22",
-  "utcTime": "2026-10-29T15:01:22.120Z",
-  "timeZone": "America/Hermosillo"
-}
-```
+---
+
+## 3. Flujos de Usuario (UX/UI Actuales)
+
+### 3.1 Panel de Administrador de 3 Columnas (`/admin` o `#admin`)
+1. **Columna 1 — Perfil de Administrador y Conector (`#admin-form-card`):**
+   * **Nombre completo del Administrador:** se congela en la pestaña `Trabajadores` para que el Admin también pueda checar asistencia si lo requiere.
+   * **ID único de Administrador (8 dígitos, rango `9000-0000` a `9999-9999`):** nunca colisiona con los IDs de trabajadores (`1000-0000` a `8999-9999`).
+   * **PIN de Seguridad (exactamente 4 dígitos numéricos `0–9`):** protege la creación de hojas adicionales y permite al Admin iniciar sesión desde cualquier celular o navegador usando *"Ya tengo mi ID"*.
+   * **Acceso directo al Checador del Admin:** botón **`⏱️ Ir a mi Checador en: [Hoja seleccionada]`** que sincroniza automáticamente el Checador personal del Admin con la hoja elegida en la Columna 2.
+2. **Columna 2 — Mis Hojas de Google Sheets y Creación en 1 Clic (`#admin-sheets-panel`):**
+   * **Catálogo de hojas vinculadas:** permite cambiar en 1 clic la hoja activa tanto para el **Cartel QR / Magic Link** como para el **Checador personal del Admin**, con botón directo **`📊 Abrir Sheet`**.
+   * **Creador de nuevas hojas en 1 clic (`admin_create_sheet`):** crea un nuevo archivo en Google Drive con la misma zona horaria y sin dejar pestañas `"Hoja 1"` sobrantes.
+   * **Migración selectiva de `Trabajadores` (desmarcada por defecto):** al activarla, despliega un selector (`#new-sheet-source-select`) para que el Admin elija **en base a cuál hoja/empresa existente** desea copiar la lista de trabajadores (conservando sus IDs de 8 dígitos, nombres congelados e historial de celulares).
+3. **Columna 3 — Cartel QR y Enlace Activo (`#admin-output-card`):**
+   * Cartel QR listo para imprimir (`@media print`) o descargar en PNG, Magic Link para compartir por WhatsApp y botón **Probar conexión**.
+
+### 3.2 Vista de Trabajador — Onboarding y Login por ID de 8 Dígitos
+1. **Pestaña *"Soy nuevo"*:**
+   * El trabajador escribe su nombre completo una sola vez y recibe su **ID único numérico de 8 dígitos** (ej. `4829-1034`).
+   * Su nombre queda **congelado** en la pestaña `Trabajadores` para impedir variaciones o errores de escritura.
+2. **Pestaña *"Ya tengo mi ID"*:**
+   * **Trabajador:** ingresa sus 8 dígitos y recupera automáticamente su nombre oficial desde Google Sheets (ideal si cambia de celular o necesita registrar asistencia desde el teléfono de un compañero).
+   * **Administrador:** si ingresa su ID de Admin (`9XXX-XXXX`), la app solicita su **PIN de 4 números** y desbloquea tanto su **Checador** como la barra superior **Modo Administrador** con selector rápido de hoja.
+
+### 3.3 Vista de Checador Diario y Menú de Opciones Simplificado
+1. **Checador de alto contraste:**
+   * Encabezado con empresa activa, nombre congelado, chip copiable con su ID de 8 dígitos y botón **Opciones**.
+   * Dos botones táctiles (**REGISTRAR ENTRADA** y **REGISTRAR SALIDA**) con prevención de doble registro accidental (< 5 min), GPS obligatorio y recibo digital con hora oficial del servidor y sello criptográfico.
+2. **Menú de Opciones (3 acciones claras):**
+   * **Cambiar QR / Hoja (`Mantiene tu sesión`):** escanea otro QR o enlace (ej. cambio de hoja anual) en 1 solo paso manteniendo su sesión e ID.
+   * **Cambiar sesión (`Misma empresa`):** permite que otro compañero ingrese con su ID de 8 dígitos en ese mismo teléfono.
+   * **Cerrar sesión (`Borra datos`, en rojo con confirmación en 2 toques):** desvincula la empresa, el usuario y la sesión del dispositivo.
 
 ---
 
-## 5. Código del Backend (Google Apps Script)
+## 4. Automatización en Google Sheets (`backend/Code.gs`)
 
-Este es el script íntegro que el Administrador pegará en su archivo de Google Sheets (*Extensiones > Apps Script*):
-
-```javascript
-function doPost(e) {
-  try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = spreadsheet.getActiveSheet();
-    
-    // Si la hoja está vacía, crear encabezados automáticamente
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "Fecha y Hora (Local)",
-        "Timestamp (UTC)",
-        "Zona Horaria",
-        "Trabajador",
-        "Tipo de Registro",
-        "Mapa (Ubicación)",
-        "Precisión GPS (metros)",
-        "Coordenadas"
-      ]);
-      sheet.getRange(1, 1, 1, 8).setFontWeight("bold");
-    }
-
-    const data = JSON.parse(e.postData.contents);
-    
-    // La hora se genera en el servidor de Google (inmune a cambios de hora en el celular)
-    const now = new Date();
-    const utcTime = now.toISOString();
-    
-    // Toma dinámicamente la zona horaria configurada en el archivo de Google Sheets
-    const sheetTimeZone = spreadsheet.getSpreadsheetTimeZone();
-    const localTime = Utilities.formatDate(now, sheetTimeZone, "yyyy-MM-dd HH:mm:ss");
-    
-    const coords = `${data.lat},${data.lng}`;
-    const mapsUrl = `https://www.google.com/maps?q=${coords}`;
-    
-    sheet.appendRow([
-      localTime,
-      utcTime,
-      sheetTimeZone,
-      data.workerName || "Sin nombre",
-      data.type || "REGISTRO",
-      mapsUrl,
-      Math.round(data.accuracy || 0),
-      coords
-    ]);
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "ok",
-      localTime: localTime,
-      utcTime: utcTime,
-      timeZone: sheetTimeZone
-    })).setMimeType(ContentService.MimeType.JSON);
-    
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-```
+1. **Cero pestañas `"Hoja 1"` sobrantes:** tanto en la hoja principal como en las hojas adicionales creadas desde el panel Admin, el script reutiliza o limpia cualquier pestaña vacía por defecto (`Hoja 1` / `Sheet1`) para que el libro solo contenga las pestañas mensuales y `Trabajadores`.
+2. **Pestañas mensuales automáticas:** crea una pestaña por mes (`Octubre 2026`, `Noviembre 2026`...) según la hora oficial del servidor y coloca siempre el mes en curso como primera pestaña a la izquierda con color esmeralda (`#10B981`).
+3. **Directorio `Trabajadores` y auditoría de celulares con índice fijo:**
+   * Asocia `ID de 8 dígitos -> Nombre congelado -> Celular titular -> Lista numerada de dispositivos (1, 2, 3...)`.
+   * Si un empleado usa un celular adicional, la columna **`Dispositivo / Auditoría`** muestra siempre el número fijo que ocupa ese equipo en su historial (`⚠️ Celular adicional #2`, `⚠️ Celular adicional #3`) o alerta en rojo si el celular pertenece a otro compañero (`🚨 Celular de Juan Pérez`).
+4. **Sello Criptográfico Encadenado (`HMAC-SHA256`):** firma cada fila con una llave privada en `PropertiesService`, detecta ediciones manuales con `onEdit` y ofrece auditoría completa desde el menú **`🛡️ Cronos`**.
 
 ---
 
-## 6. Guía Rápida para el Administrador (Para incluir en el README)
+## 5. Análisis Estratégico y Zonas de Oportunidad (UX/UI y Valor para PMs y Dueños de Empresas)
 
-1. **Crear la hoja:** Entra a [Google Sheets](https://sheets.new) y crea una hoja de cálculo nueva. Ponle nombre (ej. *Asistencia Limpieza*).
-2. **Verificar tu Zona Horaria:** Ve a **Archivo > Configuración > General > Zona horaria** y asegúrate de que esté en tu región (ej. *(GMT-07:00) Hermosillo* o la ciudad donde opere el negocio).
-3. **Pegar el código conector:**
-   * En el menú superior, haz clic en **Extensiones > Apps Script**.
-   * Borra el código que aparece por defecto y pega el código del bloque **Sección 5**.
-   * Presiona el ícono del disquete (**Guardar**).
-4. **Publicar como Web App:**
-   * Arriba a la derecha, haz clic en el botón azul **Implementar > Nueva implementación**.
-   * En "Seleccionar tipo" (ícono de engrane), elige **Aplicación web**.
-   * En *Ejecutar como*, selecciona **Yo** (tu correo).
-   * En *Quién tiene acceso*, selecciona **Cualquier persona** *(Importante para que los celulares de los trabajadores no pidan cuenta de Google)*.
-   * Haz clic en **Implementar**, autoriza los permisos con tu cuenta de Google (*Configuración avanzada > Ir a proyecto*).
-5. **Vincular con la App:**
-   * Copia la **URL de la aplicación web** que te entrega Google.
-   * Abre la app del Checador en modo Administrador, pega la URL, escribe el nombre de tu negocio y comparte el **Código QR** o el **Link de WhatsApp** con tu equipo.
+Para que **Cronos** convenza de inmediato a **Project Managers (PMs)**, supervisores de operaciones y dueños de PyMEs frente a alternativas de pago, estas son las principales áreas de oportunidad identificadas:
+
+### 5.1 Experiencia del Administrador / PM (Visibilidad y Toma de Decisiones)
+1. **Pestaña Automática de `Resumen / KPIs` en Google Sheets:**
+   * **Oportunidad:** Hoy el Admin ve la bitácora cronológica y el directorio `Trabajadores`, pero para pagar nómina o facturar horas a un cliente necesita saber cuántas horas trabajó cada persona, cuántos días asistió y cuántas incidencias de celular compartido tuvo en el mes.
+   * **Propuesta:** Generar automáticamente una pestaña **`📊 Resumen Mensual`** (o comando en el menú `🛡️ Cronos`) con fórmulas nativas de Sheets que calculen por trabajador: *Total de Entradas, Total de Salidas, Horas estimadas trabajadas, Días asistidos y Alertas de dispositivo*.
+2. **Geocercas Visuales (Radio de Sitio de Trabajo Opcional):**
+   * **Oportunidad:** El GPS actual guarda coordenadas exactas y link a Google Maps, pero el supervisor tiene que abrir el link para saber si el trabajador estaba en el sitio o a 3 km.
+   * **Propuesta:** Permitir definir opcionalmente en `/admin` las coordenadas del sitio (con un botón *"Usar mi ubicación actual como centro"* o pegando coordenadas) y un radio permitido (ej. `150 m`). Al checar, el sistema nunca bloquea al empleado, pero marca en el Sheets: `✅ En sitio (a 18 m)` vs. `⚠️ Fuera de geocerca (a 1.4 km)`.
+3. **Catálogo de Hojas con Etiquetas de Estado (Archivar / Activa) y QR Múltiple en PDF:**
+   * **Oportunidad:** Cuando un PM maneja 5 o 10 cuadrillas/clientes distintos desde un mismo conector, la lista de hojas crece.
+   * **Propuesta:** Buscador rápido en la Columna 2 (`Mis Hojas`), opción de ocultar/archivar hojas de años cerrados sin borrarlas de Drive y descarga de cartel QR con instrucciones personalizadas.
+
+### 5.2 Experiencia del Trabajador en Campo (Practicidad y Cero Fricción)
+1. **Cola Offline con Firma de Tiempo Diferida (Resiliencia en Sótanos o Zonas sin Señal):**
+   * **Oportunidad:** En sótanos, bodegas industriales o zonas rurales donde se pierde momentáneamente la red celular, el trabajador sí tiene señal GPS satelital pero falla el `POST` HTTP.
+   * **Propuesta:** Guardar el intento con sus coordenadas GPS en `localStorage` cifrado y enviarlo automáticamente en cuanto regrese la conexión, marcando en el Sheets tanto la hora de captura GPS como la hora oficial de recepción en servidor (`📶 Diferido por falta de señal`).
+2. **Historial Local de los Últimos 5 Registros en el Celular del Trabajador:**
+   * **Oportunidad:** Actualmente el pie de tarjeta muestra solo el *"Último registro"*. A veces el trabajador duda si checó el día anterior o a qué hora salió.
+   * **Propuesta:** Al tocar la barra inferior *"Último registro"*, desplegar los últimos 5 registros guardados en ese teléfono con su folio de sello criptográfico como comprobante personal.
+3. **Sugerencia Inteligente de Acción (Entrada vs. Salida):**
+   * **Oportunidad:** Reducir aún más los errores de dedo cuando el trabajador tiene prisa.
+   * **Propuesta:** Si el último registro del día fue una `ENTRADA`, resaltar sutilmente el botón de `SALIDA` como siguiente acción esperada (sin bloquear `ENTRADA` por si olvidó marcar salida el día anterior).
 
 ---
 
-## 7. Stack Tecnológico Recomendado (Etapa 1)
-* **Frontend:** HTML5 + Vanilla JavaScript (o React/Vite ligero) + Tailwind CSS (vía CDN o compilado) para mantener el peso total por debajo de 100 KB.
-* **Librería de QR (Generación y Lectura):**
-  * Generación (Admin): `qrcode.js` o API ligera en canvas.
-  * Escaneo (Trabajador): `html5-qrcode` (solo se carga si el usuario elige escanear con cámara; si entra por Magic Link de WhatsApp ni siquiera necesita permisos de cámara).
-* **PWA:** `manifest.json` + `sw.js` (Service Worker básico para cachear la interfaz estática y permitir la instalación en el teléfono).
+## 6. Hoja de Ruta Propuesta (Roadmap)
+
+| Fase | Enfoque | Entregables Clave | Impacto para PMs / Jefes |
+| :--- | :--- | :--- | :--- |
+| **Fase 1 (Completada)** | **Núcleo Serverless & Seguridad** | PWA 0-Build, QR/Magic Link, GPS obligatorio, Pestañas mensuales automáticas y Sello Criptográfico `HMAC-SHA256`. | Cero costo mensual (`$0`), privacidad total en su propio Google Drive e inmutabilidad ante ediciones manuales. |
+| **Fase 2 (Completada)** | **Identidad, Dispositivos y Multi-Hoja** | Directorio `Trabajadores` con ID de 8 dígitos, nombre congelado, rastreo de celulares (`#1`, `#2`...), Perfil de Admin (`ID 9XXX-XXXX` + `PIN de 4 dígitos` + Checador sincronizado), UI de 3 columnas y creación de nuevas hojas en 1 clic con migración selectiva. | Control total de suplantación ("checar por el compañero") y gestión multianual / multisucursal sin tocar código. |
+| **Fase 3 (Siguiente)** | **Inteligencia Operativa (Geocercas & KPIs)** | 1) Geocerca opcional por hoja (`✅ En sitio` / `⚠️ A X metros`).<br>2) Generador de pestaña **`📊 Resumen de Horas y Asistencia`** en el menú `🛡️ Cronos`.<br>3) Historial local de los últimos 5 registros en el teléfono del empleado. | Ahorro del 80% del tiempo al auditar nómina semanal/quincenal y validación instantánea de ubicación sin abrir mapa por mapa. |
+| **Fase 4 (Futuro)** | **Resiliencia en Campo & Notas** | 1) Cola de envío offline para sótanos/zonas sin cobertura.<br>2) Campo opcional de nota corta o incidencia al checar (ej. *"Tráfico por lluvia"*, *"Material entregado"*). | Operación ininterrumpida en sitios difíciles y contexto inmediato para supervisores. |
