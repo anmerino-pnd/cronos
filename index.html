@@ -1,910 +1,1020 @@
 <!DOCTYPE html>
 <html lang="es-MX">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0F172A">
-  <meta name="description" content="Cronos: Checador de asistencia con geolocalización GPS para equipos en campo, conectado directamente a tu Google Sheets.">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Cronos">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#EBF0F6" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Cronos" />
+  <meta name="description" content="Cronos — Control de asistencia con verificación GPS y registro directo en Google Sheets." />
 
-  <title>Cronos · Checador de Asistencia</title>
+  <title>Cronos · Control de Asistencia</title>
 
-  <link rel="icon" type="image/svg+xml" href="./icons/favicon.svg">
-  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icons/favicon.svg" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="manifest" href="./manifest.json" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Instrument+Sans:wght@600;700&family=JetBrains+Mono:wght@500;600;700&display=swap"
+    rel="stylesheet"
+  />
 
-  <link rel="stylesheet" href="./css/styles.css">
+  <link rel="stylesheet" href="./css/styles.css" />
 </head>
 <body>
+  <!-- Ambient Optical Canvas Background -->
+  <div class="ambient-canvas" aria-hidden="true">
+    <div class="ambient-orb ambient-orb-1"></div>
+    <div class="ambient-orb ambient-orb-2"></div>
+    <div class="ambient-orb ambient-orb-3"></div>
+  </div>
 
-  <!-- Top Navigation Bar -->
-  <header class="topbar">
+  <!-- Top Navigation Capsule -->
+  <header class="topbar no-print">
     <div class="topbar-inner">
       <a href="./" class="brand" id="brand-link" aria-label="Inicio Cronos">
-        <img src="./icons/favicon.svg" alt="" class="brand-icon" width="32" height="32">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"></circle>
+            <line x1="12" y1="3" x2="12" y2="5.2"></line>
+            <line x1="21" y1="12" x2="18.8" y2="12"></line>
+            <line x1="12" y1="21" x2="12" y2="18.8"></line>
+            <line x1="3" y1="12" x2="5.2" y2="12"></line>
+            <path d="M12 7.5v4.5l3.2 2"></path>
+          </svg>
+        </span>
         <span class="brand-text">
-          <span class="brand-name">CRONOS</span>
-          <span class="brand-tag" id="topbar-mode-tag">CHECADOR</span>
+          <span class="brand-title">CRONOS</span>
+          <span class="brand-subtitle">Asistencia verificada</span>
         </span>
       </a>
 
       <div class="topbar-actions">
-        <!-- Visible only on Welcome screen (no active worker session) -->
-        <button type="button" class="btn-topbar" id="btn-go-admin" hidden>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-          <span>Administrador</span>
+        <span id="topbar-mode-tag" class="mode-tag">CHECADOR</span>
+
+        <!-- Only visible on unconfigured Welcome view -->
+        <button type="button" id="btn-go-admin" class="btn-ghost-sm" hidden>
+          Administrador
         </button>
 
-        <!-- Visible only inside Admin Panel -->
-        <button type="button" class="btn-topbar" id="btn-exit-admin" hidden>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="19" y1="12" x2="5" y2="12"></line>
-            <polyline points="12 19 5 12 12 5"></polyline>
-          </svg>
-          <span>Volver al checador</span>
+        <!-- Only visible inside Admin view -->
+        <button type="button" id="btn-exit-admin" class="btn-ghost-sm" hidden>
+          Ir al Checador
         </button>
 
-        <!-- Visible only on Daily Worker Checador view -->
-        <button type="button" class="btn-topbar" id="btn-worker-menu" hidden>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7"></rect>
-            <rect x="14" y="3" width="7" height="7"></rect>
-            <rect x="14" y="14" width="7" height="7"></rect>
-            <rect x="3" y="14" width="7" height="7"></rect>
+        <!-- Only visible on configured Worker Checador view -->
+        <button
+          type="button"
+          id="btn-worker-menu"
+          class="btn-ghost-sm btn-worker-account"
+          aria-label="Opciones de sesión y empresa"
+          hidden
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="8" r="4"></circle>
+            <path d="M4 20c1.6-3.8 5-6 8-6s6.4 2.2 8 6"></path>
           </svg>
-          <span>Cambiar QR / Opciones</span>
+          <span>Sesión</span>
         </button>
       </div>
     </div>
   </header>
 
-  <!-- Offline Connection Notice -->
-  <div class="offline-banner" id="offline-banner" role="status" aria-live="polite" hidden>
-    Sin conexión a internet. Activa tus datos móviles o Wi-Fi para poder enviar tu registro.
+  <!-- Offline Status Strip -->
+  <div id="offline-banner" class="offline-banner no-print" role="status" aria-live="polite" hidden>
+    <span class="offline-dot" aria-hidden="true"></span>
+    <span>Sin conexión. Tu registro se guardará localmente con GPS y se sincronizará al reconectar.</span>
   </div>
 
-  <!-- Main Application Viewport -->
-  <main class="app-main" id="app-main">
-
+  <!-- Main Workspace -->
+  <main id="app-main" class="app-main">
     <!-- ===================================================================
-         VIEW 1: WORKER ONBOARDING - STEP 1 (Scan QR or Paste Invite Code)
+         VIEW 1: WELCOME (QR Scanner / Invite Link / 1-Step Sheet Switch)
          =================================================================== -->
-    <section class="card" id="view-welcome" aria-labelledby="welcome-heading" hidden>
-      <div class="card-body">
-        <span class="eyebrow" id="welcome-eyebrow">Vinculación de trabajador</span>
-        <h1 class="view-title" id="welcome-heading">Conecta con tu empresa</h1>
-        <p class="view-lead" id="welcome-lead" style="margin-bottom: 1.25rem;">
-          Escanea el código QR de tu lugar de trabajo o pega el enlace de invitación recibido por WhatsApp.
-        </p>
+    <section id="view-welcome" class="view-section" aria-labelledby="welcome-heading" hidden>
+      <div class="card">
+        <div class="card-body">
+          <div class="eyebrow" id="welcome-eyebrow">Acceso de personal</div>
+          <h1 id="welcome-heading" class="card-title">Conecta con tu empresa</h1>
+          <p class="card-lead" id="welcome-lead">
+            Escanea el código QR de tu centro de trabajo o pega tu enlace de acceso.
+          </p>
 
-        <div class="alert alert-error" id="welcome-error" role="alert" hidden></div>
+          <div id="welcome-error" class="alert alert-error" role="alert" hidden></div>
 
-        <button type="button" class="btn btn-emerald btn-block" id="btn-open-scanner">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7"></rect>
-            <rect x="14" y="3" width="7" height="7"></rect>
-            <rect x="14" y="14" width="7" height="7"></rect>
-            <rect x="3" y="14" width="7" height="7"></rect>
-          </svg>
-          <span id="label-open-scanner">Escanear QR de mi empresa</span>
-        </button>
-
-        <!-- Lazy-loaded Camera QR Scanner Panel -->
-        <div class="scanner-box" id="scanner-panel" hidden>
-          <div class="scanner-viewport" id="qr-reader" aria-live="polite">
-            <span id="scanner-status-msg" style="font-size: 0.88rem; color: #CBD5E1; padding: 1rem; text-align: center;">
-              Preparando cámara…
-            </span>
-          </div>
-          <div class="scanner-actions">
-            <label class="file-label-btn" for="qr-file-input">
-              Subir imagen de QR desde galería
-              <input type="file" id="qr-file-input" accept="image/*" hidden>
-            </label>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-close-scanner">
-              Cerrar cámara
+          <!-- Primary Action: Camera QR Scanner (Lazy-loads html5-qrcode.min.js) -->
+          <div class="stack-md">
+            <button type="button" id="btn-open-scanner" class="btn btn-primary btn-lg">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                <rect x="7" y="7" width="3" height="3"></rect>
+                <rect x="14" y="7" width="3" height="3"></rect>
+                <rect x="7" y="14" width="3" height="3"></rect>
+                <path d="M14 14h3v3"></path>
+              </svg>
+              <span id="label-open-scanner">Escanear QR de mi empresa</span>
             </button>
+
+            <!-- Expandable Camera Viewport -->
+            <div id="scanner-panel" class="scanner-panel" hidden>
+              <div class="scanner-header">
+                <span class="scanner-badge">CÁMARA ACTIVA</span>
+                <button type="button" id="btn-close-scanner" class="btn-text-sm">Cerrar cámara</button>
+              </div>
+              <div id="qr-reader" class="qr-reader-box"></div>
+              <p id="scanner-status-msg" class="scanner-hint">
+                Apunta la cámara hacia el código QR de tu empresa.
+              </p>
+              <div class="scanner-fallback-row">
+                <label for="qr-file-input" class="btn btn-secondary btn-sm">
+                  Subir foto del QR
+                </label>
+                <input type="file" id="qr-file-input" accept="image/*" class="sr-only" />
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div class="divider-label">o pegar código de invitación</div>
+          <div class="divider">
+            <span>o pega tu enlace</span>
+          </div>
 
-        <form id="form-paste-invite" novalidate>
-          <div class="field" style="margin-bottom: 0.75rem;">
-            <label class="field-label" for="input-invite-code">Pegar código o enlace de invitación</label>
+          <!-- Secondary Fallback: Paste WhatsApp Link or Invite Code -->
+          <form id="form-paste-invite" class="stack-sm" novalidate>
+            <label for="input-invite-code" class="field-label">
+              Enlace o código de invitación
+            </label>
             <div class="input-row">
               <input
                 type="text"
                 id="input-invite-code"
-                class="input-text input-mono"
-                placeholder="https://.../?join=... o código"
+                class="field-input"
+                placeholder="Pega aquí el enlace..."
                 autocomplete="off"
                 spellcheck="false"
-              >
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-paste-clipboard" title="Pegar desde el portapapeles">
+              />
+              <button type="button" id="btn-paste-clipboard" class="btn btn-secondary btn-paste" title="Pegar desde el portapapeles">
                 Pegar
               </button>
             </div>
-          </div>
-          <button type="submit" class="btn btn-primary btn-block">
-            Continuar con código
-          </button>
-        </form>
+            <button type="submit" class="btn btn-dark btn-block">
+              Vincular empresa
+            </button>
+          </form>
 
-        <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-quick-switch" style="margin-top: 0.75rem;" hidden>
-          ← Cancelar y volver a mi checador actual
-        </button>
+          <!-- Visible only when worker clicked "Cambiar QR / Hoja" from their active session -->
+          <button
+            type="button"
+            id="btn-cancel-quick-switch"
+            class="btn btn-secondary btn-block"
+            style="margin-top: 0.75rem;"
+            hidden
+          >
+            Volver a mi checador
+          </button>
+        </div>
       </div>
     </section>
 
     <!-- ===================================================================
-         VIEW 2: WORKER ONBOARDING & SESSION LOGIN (New Profile or 8-Digit ID)
+         VIEW 2: WORKER ONBOARDING & SESSION LOGIN (New or 8-Digit ID)
          =================================================================== -->
-    <section class="card" id="view-register" aria-labelledby="register-org-name" hidden>
-      <div class="company-banner">
-        <span class="company-banner-label" id="register-kicker">Te estás uniendo a:</span>
-        <h1 class="company-banner-name" id="register-org-name">—</h1>
-      </div>
+    <section id="view-register" class="view-section" aria-labelledby="register-heading" hidden>
+      <div class="card">
+        <div class="card-body">
+          <div class="company-pill-box">
+            <span class="company-pill-label" id="register-kicker">Empresa vinculada</span>
+            <strong id="register-org-name" class="company-pill-name">—</strong>
+          </div>
 
-      <div class="card-body">
-        <div class="alert alert-amber" id="register-switch-notice" role="status" hidden></div>
-        <div class="alert alert-error" id="register-error" role="alert" hidden></div>
+          <!-- Segmented Tabs: New Worker vs Existing 8-Digit ID -->
+          <div class="auth-tabs" id="auth-mode-tabs" role="tablist" aria-label="Modo de acceso">
+            <button
+              type="button"
+              id="tab-auth-new"
+              class="auth-tab is-active"
+              role="tab"
+              aria-selected="true"
+            >
+              Soy nuevo
+            </button>
+            <button
+              type="button"
+              id="tab-auth-id"
+              class="auth-tab"
+              role="tab"
+              aria-selected="false"
+            >
+              Ya tengo mi ID
+            </button>
+          </div>
 
-        <!-- 2-Tab Mode Switcher: New Worker vs. Login with 8-Digit ID -->
-        <div class="auth-tabs" id="auth-mode-tabs" role="tablist" aria-label="Modo de acceso">
-          <button type="button" class="auth-tab is-active" id="tab-auth-new" role="tab" aria-selected="true">
-            Soy nuevo
-          </button>
-          <button type="button" class="auth-tab" id="tab-auth-id" role="tab" aria-selected="false">
-            Ya tengo mi ID
-          </button>
-        </div>
+          <div id="register-switch-notice" class="alert alert-amber" hidden></div>
+          <div id="register-error" class="alert alert-error" role="alert" hidden></div>
 
-        <form id="form-worker-register" novalidate>
-          <!-- Pane 1: New Worker (Creates 8-digit ID & freezes full name) -->
-          <div id="pane-auth-new">
-            <div class="field">
-              <label class="field-label" for="input-worker-name">Nombre completo del trabajador</label>
-              <input
-                type="text"
-                id="input-worker-name"
-                class="input-text"
-                placeholder="Ej. Juan Pérez López"
-                autocomplete="name"
-                maxlength="80"
-              >
-              <p class="field-hint">
-                Este nombre quedará <strong>congelado</strong> a tu ID para evitar variaciones en la hoja de asistencia.
-              </p>
+          <form id="form-worker-register" class="stack-md" novalidate>
+            <!-- PANE A: New Worker (Full Name + Generated 8-Digit ID) -->
+            <div id="pane-auth-new" class="stack-md">
+              <div>
+                <h1 id="register-heading" class="card-title">Crea tu perfil</h1>
+                <p class="card-lead" style="margin-bottom: 0;">
+                  Escribe tu nombre completo y conserva tu ID personal de 8 dígitos.
+                </p>
+              </div>
+
+              <div>
+                <label for="input-worker-name" class="field-label">
+                  Nombre y apellido
+                </label>
+                <input
+                  type="text"
+                  id="input-worker-name"
+                  class="field-input field-input-lg"
+                  placeholder="Ej. Juan Pérez"
+                  autocomplete="name"
+                  maxlength="80"
+                />
+                <span class="field-hint">
+                  Tu nombre quedará vinculado de forma permanente a tu ID.
+                </span>
+              </div>
+
+              <!-- Pre-generated 8-Digit Personal ID Card -->
+              <div class="id-generated-box">
+                <div class="id-generated-header">
+                  <span class="id-generated-kicker">TU ID DE ACCESO (8 DÍGITOS)</span>
+                  <button type="button" id="btn-copy-register-id" class="btn-copy-chip">
+                    Copiar ID
+                  </button>
+                </div>
+                <div id="register-generated-id" class="id-generated-digits">0000-0000</div>
+                <p class="id-generated-hint">
+                  Guárdalo. Lo usarás para entrar desde otro teléfono sin duplicar tu perfil.
+                </p>
+              </div>
             </div>
 
-            <div class="id-showcase-box" style="margin-bottom: 1rem; padding: 0.8rem 0.9rem;">
-              <span class="id-showcase-label">TU ID DE ACCESO (APÚNTALO O CÓPIALO)</span>
-              <div class="id-showcase-digits" id="register-generated-id" style="font-size: 1.65rem;">0000-0000</div>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-register-id">
-                Copiar mi ID de 8 dígitos
+            <!-- PANE B: Existing Worker or Admin Login by 8-Digit ID -->
+            <div id="pane-auth-id" class="stack-md" hidden>
+              <div>
+                <h2 class="card-title">Ingresa con tu ID</h2>
+                <p class="card-lead" style="margin-bottom: 0;">
+                  Escribe tu ID de 8 dígitos para cargar tu perfil en este dispositivo.
+                </p>
+              </div>
+
+              <div>
+                <label for="input-worker-id" class="field-label">
+                  Tu ID de 8 dígitos
+                </label>
+                <input
+                  type="text"
+                  id="input-worker-id"
+                  class="field-input field-input-lg field-input-id"
+                  placeholder="0000-0000"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  maxlength="9"
+                />
+                <span class="field-hint">
+                  Ingresa los 8 números de tu identificador personal o de administrador.
+                </span>
+              </div>
+
+              <!-- Shown automatically when an Admin 8-digit ID (9XXXXXXX) is entered -->
+              <div id="login-admin-pin-box" class="alert alert-amber" hidden>
+                <label for="input-login-admin-pin" class="field-label" style="color: #0F172A;">
+                  PIN de Administrador (4 números)
+                </label>
+                <input
+                  type="password"
+                  id="input-login-admin-pin"
+                  class="field-input"
+                  placeholder="•••• (4 dígitos)"
+                  inputmode="numeric"
+                  maxlength="4"
+                  autocomplete="off"
+                />
+                <span class="field-hint" id="login-admin-pin-hint" style="color: #475569;">
+                  Ingresa tu PIN de 4 números para desbloquear tus opciones de Admin y tu Checador.
+                </span>
+              </div>
+
+              <!-- Shown only if the sheet is brand-new and doesn't have this ID recorded yet -->
+              <div id="login-bind-name-box" class="alert alert-amber" hidden>
+                <label for="input-bind-worker-name" class="field-label" style="color: #0F172A;">
+                  Confirma tu nombre completo (única vez en esta hoja)
+                </label>
+                <input
+                  type="text"
+                  id="input-bind-worker-name"
+                  class="field-input"
+                  placeholder="Ej. Juan Pérez"
+                  maxlength="80"
+                />
+                <span class="field-hint" style="color: #475569;">
+                  Esta hoja es nueva. Tu nombre se vinculará a tu mismo ID.
+                </span>
+              </div>
+            </div>
+
+            <!-- Mandatory GPS Privacy Notice -->
+            <label class="consent-box" for="input-privacy-accept">
+              <input type="checkbox" id="input-privacy-accept" class="consent-checkbox" required />
+              <span class="consent-text">
+                <strong>Uso puntual de GPS:</strong> Autorizo capturar mi ubicación únicamente al presionar
+                <em>Entrada</em> o <em>Salida</em>. Cronos no rastrea en segundo plano.
+              </span>
+            </label>
+
+            <div class="stack-xs">
+              <button type="submit" id="btn-save-worker" class="btn btn-primary btn-lg">
+                Crear mi ID y solicitar acceso
+              </button>
+              <button type="button" id="btn-cancel-register" class="btn btn-secondary btn-block">
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================
+         VIEW 3: DAILY WORKER CHECADOR (1-Tap Punch In / Out)
+         =================================================================== -->
+    <section id="view-checador" class="view-section" aria-label="Checador de asistencia" hidden>
+      <!-- Admin Mode Shortcut Bar (Only visible when logged in with an Admin ID) -->
+      <div id="admin-checador-bar" class="admin-checador-bar no-print" hidden>
+        <div class="admin-checador-bar-top">
+          <div class="admin-checador-bar-info">
+            <span class="admin-checador-kicker">MODO ADMINISTRADOR</span>
+            <span class="admin-checador-sub">Tu checador personal y tu panel están activos</span>
+          </div>
+          <button type="button" id="btn-checador-open-admin" class="btn btn-dark btn-sm">
+            Panel y Hojas
+          </button>
+        </div>
+        <div id="admin-checador-sheet-row" class="admin-checador-sheet-row" hidden>
+          <label for="admin-checador-sheet-select" class="admin-checador-sheet-label">
+            Hoja activa en Checador:
+          </label>
+          <select id="admin-checador-sheet-select" class="admin-checador-sheet-select"></select>
+        </div>
+      </div>
+
+      <div class="card checador-card">
+        <!-- Active Company, Frozen Worker Identity & 8-Digit ID Badge -->
+        <div class="worker-strip">
+          <div class="worker-strip-info">
+            <span class="worker-strip-label">EMPRESA</span>
+            <strong id="checador-org-name" class="worker-strip-org">—</strong>
+          </div>
+          <div class="worker-strip-info worker-strip-right">
+            <span class="worker-strip-label">TRABAJADOR</span>
+            <div class="worker-strip-user-row">
+              <strong id="checador-worker-name" class="worker-strip-name">—</strong>
+            </div>
+            <div class="worker-strip-actions-row">
+              <button
+                type="button"
+                id="btn-copy-worker-id"
+                class="worker-id-chip"
+                title="Ver y copiar mi ID de 8 dígitos"
+              >
+                <span class="worker-id-chip-label">ID</span>
+                <span id="checador-worker-id" class="worker-id-chip-code">----</span>
+                <span class="worker-id-chip-copy" id="worker-id-copy-tag">COPIAR</span>
+              </button>
+              <button
+                type="button"
+                id="btn-card-options"
+                class="worker-Switch-pill"
+                aria-label="Opciones de sesión, cambiar trabajador o empresa"
+              >
+                Opciones
               </button>
             </div>
           </div>
+        </div>
 
-          <!-- Pane 2: Existing Worker Login by 8-Digit Numeric ID -->
-          <div id="pane-auth-id" hidden>
-            <div class="field">
-              <label class="field-label" for="input-worker-id">Tu ID de trabajador (8 dígitos)</label>
-              <input
-                type="text"
-                id="input-worker-id"
-                class="input-text input-mono input-id-code"
-                inputmode="numeric"
-                pattern="[0-9\-\s]*"
-                placeholder="Ej. 4829-1034"
-                autocomplete="off"
-                maxlength="9"
-              >
-              <p class="field-hint">
-                Ingresa tus 8 números para cargar tu nombre oficial en este celular.
-              </p>
-            </div>
+        <!-- Reference Device Clock -->
+        <div class="clock-strip" aria-live="off">
+          <div class="clock-label">HORA DEL DISPOSITIVO</div>
+          <div id="live-clock-time" class="clock-time">--:--:--</div>
+          <div id="live-clock-date" class="clock-date">—</div>
+          <div class="clock-note">Hora oficial validada por servidor al registrar</div>
+        </div>
 
-            <!-- Shown when the 8-digit ID belongs to the Administrator -->
-            <div class="field" id="login-admin-pin-box" hidden>
-              <label class="field-label" for="input-login-admin-pin">PIN de Administrador (exactamente 4 números)</label>
-              <input
-                type="password"
-                id="input-login-admin-pin"
-                class="input-text input-mono input-id-code"
-                inputmode="numeric"
-                pattern="[0-9]{4}"
-                placeholder="Ej. 1234"
-                autocomplete="off"
-                maxlength="4"
-              >
-              <p class="field-hint" id="login-admin-pin-hint">
-                ID de Administrador reconocido. Ingresa tu PIN de 4 números para abrir tus opciones de Admin y tu Checador.
-              </p>
-            </div>
-
-            <!-- Shown only if the 8-digit ID is valid but used for the first time on a brand-new Sheet -->
-            <div class="field" id="login-bind-name-box" hidden>
-              <label class="field-label" for="input-bind-worker-name">Nombre completo (1ª vez en esta hoja)</label>
-              <input
-                type="text"
-                id="input-bind-worker-name"
-                class="input-text"
-                placeholder="Ej. Juan Pérez López"
-                autocomplete="name"
-                maxlength="80"
-              >
-              <p class="field-hint">
-                Esta hoja es nueva y aún no tiene registrado tu ID. Escribe tu nombre una sola vez para conservar tu mismo ID de 8 dígitos.
+        <!-- Offline Queue Sync Banner (Shown when punches are queued offline) -->
+        <div id="offline-queue-banner" class="offline-queue-banner" hidden>
+          <div class="offline-queue-info">
+            <span class="offline-queue-badge" id="offline-queue-count-badge">1</span>
+            <div>
+              <strong class="offline-queue-title" id="offline-queue-title">1 registro guardado sin internet</strong>
+              <p class="offline-queue-sub" id="offline-queue-sub">
+                Coordenadas GPS capturadas. Se enviará al recuperar conexión.
               </p>
             </div>
           </div>
-
-          <label class="checkbox-card" for="input-privacy-accept">
-            <input type="checkbox" id="input-privacy-accept" required>
-            <span class="checkbox-text">
-              <strong>Acepto el aviso de privacidad:</strong> autorizo el uso de mi ubicación GPS <em>únicamente</em> en el momento exacto en que presiono el botón de registrar Entrada o Salida (sin rastreo continuo).
-            </span>
-          </label>
-
-          <button type="submit" class="btn btn-emerald btn-block" id="btn-save-worker">
-            Crear mi ID y entrar
-          </button>
-
-          <button type="button" class="btn btn-secondary btn-block" id="btn-cancel-register" style="margin-top: 0.65rem;">
-            Cancelar
-          </button>
-        </form>
-      </div>
-    </section>
-
-    <!-- ===================================================================
-         VIEW 3: DAILY WORKER CHECADOR (High-Contrast Timecard)
-         =================================================================== -->
-    <section class="card" id="view-checador" aria-label="Checador de asistencia" hidden>
-      <!-- Admin Quick Access Bar (Visible when logged in with Admin ID) -->
-      <div class="admin-checador-bar no-print" id="admin-checador-bar" hidden>
-        <div class="admin-checador-bar-top">
-          <span class="admin-checador-badge">Modo Administrador</span>
-          <button type="button" class="btn btn-emerald btn-sm" id="btn-checador-open-admin">
-            Panel de Admin / Hojas
+          <button type="button" id="btn-sync-offline-now" class="btn btn-secondary btn-sm">
+            Sincronizar
           </button>
         </div>
-        <div class="admin-checador-sheet-row" id="admin-checador-sheet-row" hidden>
-          <label class="admin-checador-sheet-label" for="admin-checador-sheet-select">Checar en hoja:</label>
-          <select id="admin-checador-sheet-select" class="admin-checador-select"></select>
-        </div>
-      </div>
 
-      <!-- Worker & Company Credential Header -->
-      <div class="timecard-header">
-        <div class="timecard-identity">
-          <span class="worker-org-badge">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span id="checador-org-name">—</span>
-          </span>
-          <h1 class="worker-display-name" id="checador-worker-name">—</h1>
-          <div class="worker-id-row">
-            <button type="button" class="worker-id-chip" id="btn-copy-worker-id" title="Toca para copiar tu ID de 8 dígitos">
-              <span class="worker-id-prefix">ID</span>
-              <span id="checador-worker-id">----</span>
-              <span class="worker-id-copy-tag" id="worker-id-copy-tag">Copiar</span>
-            </button>
+        <!-- Pending Admin Approval Gate -->
+        <div id="worker-pending-box" class="worker-status-gate is-pending" hidden>
+          <div class="worker-status-gate-pill">
+            <span class="status-pip is-pending" aria-hidden="true"></span>
+            <span>PENDIENTE DE APROBACIÓN</span>
           </div>
+          <h2 class="worker-status-gate-title">Solicitud enviada al administrador</h2>
+          <p class="worker-status-gate-desc">
+            Tu perfil e ID fueron registrados en la pestaña <strong>Trabajadores</strong>.
+            En cuanto el administrador apruebe tu acceso podrás registrar Entrada y Salida.
+          </p>
+          <button type="button" id="btn-check-approval-status" class="btn btn-primary btn-block">
+            Verificar si ya fui aprobado
+          </button>
         </div>
-        <button type="button" class="btn-card-options" id="btn-card-options" aria-label="Abrir opciones de sesión y hoja">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-          <span>Opciones</span>
-        </button>
-      </div>
 
-      <!-- Reference Clock Strip -->
-      <div class="clock-strip" aria-label="Reloj de referencia">
-        <div>
-          <div class="clock-digits" id="live-clock-time">--:--:--</div>
-          <div class="clock-date" id="live-clock-date">—</div>
-        </div>
-        <div class="server-pill">
-          HORA OFICIAL<br>VÍA SERVIDOR
-        </div>
-      </div>
-
-      <!-- Offline Queue Sync Banner -->
-      <div class="offline-queue-banner no-print" id="offline-queue-banner" role="status" aria-live="polite" hidden>
-        <div class="offline-queue-info">
-          <span class="offline-queue-badge" id="offline-queue-count-badge">1</span>
-          <div>
-            <strong class="offline-queue-title" id="offline-queue-title">Registro guardado sin conexión</strong>
-            <p class="offline-queue-sub" id="offline-queue-sub">Se enviará automáticamente en cuanto vuelva el internet.</p>
+        <!-- Deactivated / Ex-Worker Blocked Gate -->
+        <div id="worker-blocked-box" class="worker-status-gate is-blocked" hidden>
+          <div class="worker-status-gate-pill is-danger">
+            <span class="status-pip is-baja" aria-hidden="true"></span>
+            <span>ACCESO DESACTIVADO</span>
           </div>
-        </div>
-        <button type="button" class="btn btn-primary btn-sm" id="btn-sync-offline-now">
-          Sincronizar
-        </button>
-      </div>
-
-      <!-- Worker Account Status Gates (Pending Approval or Blocked Ex-Worker) -->
-      <div class="worker-status-gate is-pending" id="worker-pending-box" role="status" aria-live="polite" hidden>
-        <div class="worker-status-gate-pill">🟡 Solicitud pendiente de aprobación</div>
-        <h2 class="worker-status-gate-title">Tu solicitud fue enviada al Administrador</h2>
-        <p class="worker-status-gate-desc">
-          Tu nombre y tu ID de 8 dígitos ya están registrados en espera de autorización. En cuanto el administrador te apruebe (en su panel o en la columna <strong>Estatus de Acceso</strong> del Google Sheets), podrás registrar tu Entrada y Salida.
-        </p>
-        <button type="button" class="btn btn-emerald btn-block" id="btn-check-approval-status">
-          🔄 Verificar si ya fui aprobado
-        </button>
-      </div>
-
-      <div class="worker-status-gate is-blocked" id="worker-blocked-box" role="alert" hidden>
-        <div class="worker-status-gate-pill is-danger">🔴 Acceso dado de baja</div>
-        <h2 class="worker-status-gate-title">Cuenta desactivada por el Administrador</h2>
-        <p class="worker-status-gate-desc" id="worker-blocked-desc">
-          Esta cuenta o dispositivo fue dado de baja en el directorio de la empresa y no tiene permiso para registrar asistencia.
-        </p>
-      </div>
-
-      <!-- Main Punch Buttons -->
-      <div class="punch-zone" id="punch-zone">
-        <div class="smart-shift-banner" id="smart-shift-banner">
-          <span class="smart-shift-dot" id="smart-shift-dot" aria-hidden="true"></span>
-          <span id="smart-shift-text">Siguiente marca sugerida: <strong>ENTRADA</strong></span>
+          <h2 class="worker-status-gate-title">Cuenta dada de baja</h2>
+          <p class="worker-status-gate-desc" id="worker-blocked-desc">
+            Este perfil o dispositivo fue dado de baja por el administrador y no tiene autorización para registrar asistencia.
+          </p>
         </div>
 
-        <button type="button" class="btn-punch btn-punch-in is-suggested" id="btn-punch-in">
-          <span class="punch-icon-box" aria-hidden="true">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-              <polyline points="10 17 15 12 10 7"></polyline>
-              <line x1="15" y1="12" x2="3" y2="12"></line>
-            </svg>
-          </span>
-          <span class="punch-copy">
-            <span class="punch-title-row">
-              <span class="punch-title">REGISTRAR ENTRADA</span>
-              <span class="punch-suggest-tag" id="badge-suggest-in">Sugerido</span>
-            </span>
-            <span class="punch-sub">Capturar ubicación GPS e iniciar jornada</span>
-          </span>
-        </button>
+        <!-- Giant Tactile Punch Buttons + Smart Shift Indicator -->
+        <div class="punch-zone" id="punch-zone">
+          <div id="smart-shift-banner" class="smart-shift-banner">
+            <span class="smart-shift-dot" id="smart-shift-dot"></span>
+            <span id="smart-shift-text">Siguiente marca sugerida: <strong>ENTRADA</strong></span>
+          </div>
 
-        <button type="button" class="btn-punch btn-punch-out" id="btn-punch-out">
-          <span class="punch-icon-box" aria-hidden="true">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-              <polyline points="16 17 21 12 16 7"></polyline>
-              <line x1="21" y1="12" x2="9" y2="12"></line>
-            </svg>
-          </span>
-          <span class="punch-copy">
-            <span class="punch-title-row">
-              <span class="punch-title">REGISTRAR SALIDA</span>
-              <span class="punch-suggest-tag" id="badge-suggest-out" hidden>Sugerido</span>
+          <button type="button" id="btn-punch-in" class="btn-punch btn-punch-in is-suggested">
+            <span class="punch-icon" aria-hidden="true">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                <polyline points="10 17 15 12 10 7"></polyline>
+                <line x1="15" y1="12" x2="3" y2="12"></line>
+              </svg>
             </span>
-            <span class="punch-sub">Capturar ubicación GPS y finalizar jornada</span>
-          </span>
-        </button>
-      </div>
+            <span class="punch-copy">
+              <span class="punch-title-row">
+                <span class="punch-title">REGISTRAR ENTRADA</span>
+                <span class="punch-suggest-tag" id="badge-suggest-in">SUGERIDO</span>
+              </span>
+              <span class="punch-sub">Iniciar jornada · GPS requerido</span>
+            </span>
+          </button>
 
-      <!-- Active Loading / Mandatory GPS Error Box -->
-      <div class="status-box" id="punch-loading-box" role="status" aria-live="polite" hidden>
-        <div class="status-loading">
+          <button type="button" id="btn-punch-out" class="btn-punch btn-punch-out">
+            <span class="punch-icon" aria-hidden="true">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </span>
+            <span class="punch-copy">
+              <span class="punch-title-row">
+                <span class="punch-title">REGISTRAR SALIDA</span>
+                <span class="punch-suggest-tag" id="badge-suggest-out" hidden>SUGERIDO</span>
+              </span>
+              <span class="punch-sub">Finalizar jornada · GPS requerido</span>
+            </span>
+          </button>
+        </div>
+
+        <!-- Inline GPS / Network Progress State -->
+        <div id="punch-loading-box" class="status-box status-loading" role="status" aria-live="polite" hidden>
           <div class="spinner" aria-hidden="true"></div>
-          <div>
-            <p class="status-step-title" id="punch-loading-title">Obteniendo ubicación GPS…</p>
-            <p class="status-step-sub" id="punch-loading-sub">Mantén la pantalla encendida unos segundos.</p>
+          <div class="status-box-text">
+            <strong id="punch-loading-title">Obteniendo ubicación GPS…</strong>
+            <span id="punch-loading-sub">Autoriza el permiso si tu navegador lo solicita.</span>
           </div>
         </div>
-      </div>
 
-      <div class="status-box gps-error-box" id="punch-error-box" role="alert" hidden>
-        <p class="gps-error-title" id="punch-error-title">No se pudo obtener tu ubicación GPS</p>
-        <p class="gps-error-desc" id="punch-error-desc"></p>
-        <ol class="gps-error-steps" id="punch-error-steps" hidden></ol>
-        <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-retry-punch">
-          Reintentar registro
-        </button>
-      </div>
-
-      <!-- Mini-Historial Local (Last 5 Punches with HMAC Proof) -->
-      <div class="worker-history-box no-print" id="worker-history-box" hidden>
-        <div class="worker-history-header">
-          <span class="worker-history-title">Mis últimas marcas en este celular</span>
-          <span class="worker-history-badge" id="worker-history-count">0</span>
+        <!-- Inline Actionable GPS / Network Error Box -->
+        <div id="punch-error-box" class="status-box status-error" role="alert" hidden>
+          <div class="status-error-header">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <strong id="punch-error-title">No se pudo completar el registro</strong>
+          </div>
+          <p id="punch-error-desc" class="status-error-desc"></p>
+          <ol id="punch-error-steps" class="status-error-steps" hidden></ol>
+          <button type="button" id="btn-retry-punch" class="btn btn-dark btn-sm">
+            Reintentar registro
+          </button>
         </div>
-        <div class="worker-history-list" id="worker-history-list" role="list"></div>
-      </div>
 
-      <!-- Perforated Last Check-in Ticket Footer -->
-      <div class="ticket-footer" id="last-checkin-footer">
-        <span class="ticket-label">Último registro</span>
-        <span class="ticket-value" id="last-checkin-value">Sin registros previos</span>
+        <!-- Mini-Historial Local (Last 5 Punches with Cryptographic Seals) -->
+        <div id="worker-history-box" class="worker-history-box" hidden>
+          <div class="worker-history-header">
+            <span class="worker-history-title">ÚLTIMOS REGISTROS EN ESTE DISPOSITIVO</span>
+            <span class="worker-history-badge" id="worker-history-count">0</span>
+          </div>
+          <div id="worker-history-list" class="worker-history-list" role="list"></div>
+        </div>
+
+        <!-- Last Confirmed Check-in Footer -->
+        <div class="last-checkin-bar">
+          <span class="last-checkin-label">Último registro confirmado:</span>
+          <span id="last-checkin-value" class="last-checkin-value">Sin registros previos</span>
+        </div>
       </div>
     </section>
 
     <!-- ===================================================================
-         PWA INSTALL BANNER (Android beforeinstallprompt & iOS Instructions)
+         CONTEXTUAL PWA INSTALL BANNER (Shown on Register & Checador views)
          =================================================================== -->
-    <aside class="pwa-banner no-print" id="pwa-install-banner" aria-label="Instalar aplicación" hidden>
+    <aside id="pwa-install-banner" class="pwa-banner no-print" aria-label="Instalar aplicación" hidden>
       <!-- Android / Chromium native prompt -->
-      <div class="pwa-banner-content" id="pwa-android-box" hidden>
-        <p class="pwa-banner-title">Instala Cronos en tu teléfono</p>
-        <p class="pwa-banner-text" style="margin-bottom: 0.6rem;">
-          Accede directo desde tu pantalla de inicio sin buscar el enlace cada mañana.
-        </p>
-        <button type="button" class="btn btn-primary btn-sm" id="btn-pwa-install">
-          Instalar aplicación
-        </button>
+      <div id="pwa-android-box" class="pwa-banner-inner" hidden>
+        <div class="pwa-banner-copy">
+          <strong>Instala Cronos en tu inicio</strong>
+          <span>Abre el checador directo desde tu pantalla principal.</span>
+        </div>
+        <div class="pwa-banner-btns">
+          <button type="button" id="btn-pwa-install" class="btn btn-primary btn-sm">
+            Instalar
+          </button>
+          <button type="button" id="btn-pwa-dismiss" class="btn-icon-close" aria-label="Cerrar aviso">
+            ✕
+          </button>
+        </div>
       </div>
 
-      <!-- iOS Safari instructions -->
-      <div class="pwa-banner-content" id="pwa-ios-box" hidden>
-        <p class="pwa-banner-title">Guarda Cronos en tu inicio</p>
-        <p class="pwa-banner-text">
-          Para no perder tu sesión, toca <strong>Compartir</strong>
-          <svg class="pwa-inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-            <polyline points="16 6 12 2 8 6"></polyline>
-            <line x1="12" y1="2" x2="12" y2="15"></line>
-          </svg>
-          &gt; <strong>Agregar a inicio</strong>.
-        </p>
+      <!-- iOS Safari visual instruction -->
+      <div id="pwa-ios-box" class="pwa-banner-inner" hidden>
+        <div class="pwa-banner-copy">
+          <strong>Agrega Cronos a tu iPhone</strong>
+          <span>
+            Toca <strong>Compartir</strong>
+            <svg class="inline-ios-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+              <polyline points="16 6 12 2 8 6"></polyline>
+              <line x1="12" y1="2" x2="12" y2="15"></line>
+            </svg>
+            y selecciona <strong>"Agregar a pantalla de inicio"</strong>.
+          </span>
+        </div>
       </div>
-
-      <button type="button" class="btn-dismiss" id="btn-pwa-dismiss" aria-label="Cerrar aviso de instalación">
-        &times;
-      </button>
     </aside>
 
     <!-- ===================================================================
          VIEW 4: ADMINISTRATOR PANEL (/admin or #admin)
          =================================================================== -->
-    <section id="view-admin" aria-labelledby="admin-heading" hidden>
-      <div class="card no-print" style="margin-bottom: 1.15rem;">
-        <div class="card-body">
-          <span class="eyebrow">Configuración de Empresa · 100% Serverless</span>
-          <h1 class="view-title" id="admin-heading">Panel de Administrador</h1>
-          <p class="view-lead">
-            Conecta tu propia hoja de Google Sheets y genera el código QR o enlace de invitación por WhatsApp para tu equipo. Los datos viajan directo de los celulares a tu cuenta de Google.
-          </p>
-        </div>
-      </div>
-
-      <!-- Interactive Step-by-Step Guide + Copyable Google Apps Script -->
-      <details class="setup-guide no-print" id="admin-setup-guide" open style="margin-bottom: 1.25rem;">
-        <summary>
-          <span>Guía rápida: Configurar Google Sheets en 3 minutos</span>
-          <span class="guide-badge">Ver / Ocultar pasos</span>
+    <section id="view-admin" class="view-section view-admin" aria-labelledby="admin-heading" hidden>
+      <!-- Step-by-step Setup Guide for Google Sheets + Apps Script -->
+      <details class="setup-guide no-print" id="admin-setup-guide" open>
+        <summary class="setup-guide-summary">
+          <div class="setup-guide-title-wrap">
+            <span class="setup-badge">PASO A PASO</span>
+            <span class="setup-guide-title">Guía de configuración inicial (3 minutos · única vez)</span>
+          </div>
+          <span class="setup-guide-toggle">Mostrar / Ocultar</span>
         </summary>
+
         <div class="setup-guide-body">
-          <ol class="steps-list">
+          <ol class="setup-steps-list">
             <li>
-              <strong>Crea tu hoja y verifica la Zona Horaria:</strong> abre
-              <a href="https://sheets.new" target="_blank" rel="noopener noreferrer">sheets.new</a>,
-              ponle nombre a tu archivo (ej. <em>Asistencia Limpieza</em>) y revisa en
-              <strong>Archivo &gt; Configuración &gt; General &gt; Zona horaria</strong> que corresponda a tu ciudad.
+              <strong>Crea tu Google Sheet base</strong>
+              <p>
+                Abre
+                <a href="https://sheets.new" target="_blank" rel="noopener noreferrer" class="text-link">
+                  sheets.new
+                </a>
+                y ponle nombre arriba a la izquierda:
+                <button
+                  type="button"
+                  class="copy-inline-chip"
+                  data-copy-text="Asistencia 2026"
+                  title="Haz clic para copiar"
+                >
+                  Copiar "Asistencia 2026"
+                </button>.
+                Las pestañas mensuales, <strong>Trabajadores</strong> y <strong>Resumen Mensual</strong> se crean automáticamente.
+              </p>
             </li>
-
             <li>
-              <strong>Crea y guarda el conector en Apps Script:</strong>
-              en el menú superior de Google Sheets haz clic en <strong>Extensiones &gt; Apps Script</strong>.
-              <br>• Arriba a la izquierda haz clic donde dice <strong>Proyecto sin título</strong> para nombrarlo (puedes copiar y pegar este nombre):
-              <br>
-              <span class="copy-snippet-row">
-                <code class="copy-snippet-code">Cronos - Conector de Asistencia</code>
-                <button type="button" class="btn-copy-chip" data-copy-text="Cronos - Conector de Asistencia">
-                  Copiar nombre
+              <strong>Pega el motor en Apps Script</strong>
+              <p>
+                En tu hoja ve a <strong>Extensiones &gt; Apps Script</strong>, borra el contenido de
+                <code>Código.gs</code>, pega este bloque y presiona <strong>Guardar</strong>:
+              </p>
+              <div class="code-box-wrapper">
+                <div class="code-box-toolbar">
+                  <span>backend/Code.gs (Apps Script)</span>
+                  <button type="button" id="btn-copy-gas" class="btn btn-primary btn-sm">
+                    Copiar código Apps Script
+                  </button>
+                </div>
+                <pre id="gas-code-preview" class="code-box-pre">Cargando código de Apps Script…</pre>
+              </div>
+            </li>
+            <li>
+              <strong>Publica como Aplicación Web</strong>
+              <p>
+                Haz clic en <strong>Implementar &gt; Nueva implementación</strong>, selecciona el engrane
+                <strong>Aplicación web</strong>, escribe la descripción
+                <button
+                  type="button"
+                  class="copy-inline-chip"
+                  data-copy-text="Checador Cronos"
+                  title="Haz clic para copiar"
+                >
+                  Copiar "Checador Cronos"
                 </button>
-              </span>
-              <br>• Borra todo el código que aparece por defecto en el editor y pega el siguiente bloque:
-              <div class="code-toolbar">
-                <span>Código.gs (Google Apps Script)</span>
-                <button type="button" class="btn btn-emerald btn-sm" id="btn-copy-gas" style="padding: 0.32rem 0.7rem; font-size: 0.78rem;">
-                  Copiar código
-                </button>
-              </div>
-              <pre class="code-pre"><code id="gas-code-preview">Cargando script…</code></pre>
-              <div style="margin-top: 0.5rem;">
-                • Arriba del editor, presiona el ícono del disquete llamado <strong>Guardar proyecto en Drive</strong> (o <code>Ctrl + S</code>).
-              </div>
+                y configura:
+              </p>
+              <ul class="setup-sublist">
+                <li><strong>Ejecutar como:</strong> <code>Yo</code> (tu cuenta de Google).</li>
+                <li><strong>Quién tiene acceso:</strong> <code>Cualquier usuario</code> (indispensable para que el personal registre sin iniciar sesión de Google).</li>
+                <li>Autoriza con <em>Autorizar acceso &gt; Avanzado &gt; Ir a proyecto (no seguro) &gt; Permitir</em>. Al usar el creador de hojas nuevas te pedirá autorizar Google Drive una sola vez.</li>
+              </ul>
             </li>
-
             <li>
-              <strong>Configura la Nueva implementación:</strong>
-              arriba a la derecha presiona el botón azul <strong>Implementar &gt; Nueva implementación</strong>.
-              <br>• En la ventana que se abre, haz clic en el <strong>botón de engranaje (&#9881;&#65039;)</strong> junto a <em>"Seleccionar tipo"</em> y elige <strong>Aplicación web</strong>.
-              <br>• Completa los campos de la siguiente manera:
-              <div class="deploy-fields-box">
-                <div>
-                  <strong>Descripción:</strong> copia y pega esta referencia:
-                  <br>
-                  <span class="copy-snippet-row" style="background-color: #FFFFFF;">
-                    <code class="copy-snippet-code">Conector de asistencia Cronos</code>
-                    <button type="button" class="btn-copy-chip" data-copy-text="Conector de asistencia Cronos">
-                      Copiar descripción
-                    </button>
-                  </span>
-                </div>
-                <div>• <strong>Ejecutar como:</strong> selecciona <strong>Yo</strong> (tu correo).</div>
-                <div>
-                  • <strong>Quién tiene acceso:</strong> selecciona <strong>Cualquier usuario</strong>
-                  <em>(indispensable para que los celulares de los trabajadores registren asistencia sin pedir cuenta de Google)</em>.
-                </div>
-              </div>
-              Presiona el botón azul <strong>Implementar</strong>.
-            </li>
-
-            <li>
-              <strong>Autoriza los permisos en Google y copia la URL:</strong>
-              presiona <strong>Autorizar acceso</strong> y elige tu cuenta de Google.
-              <div class="auth-callout">
-                <strong>Aviso sobre "Google no ha verificado esta aplicación" (100% normal):</strong>
-                Google muestra esta pantalla porque el script lo acabas de crear tú mismo en tu propio Drive y no es una aplicación comercial externa. Para finalizar la autorización sigue estos pasos:
-                <ol class="auth-substeps">
-                  <li>Haz clic abajo a la izquierda en <strong>Avanzado</strong> (o <strong>Configuración avanzada</strong>).</li>
-                  <li>Haz clic abajo en <strong>Ir a Cronos - Conector de Asistencia (unsafe)</strong> / <strong>(no seguro)</strong>.</li>
-                  <li>En la siguiente ventana presiona <strong>Continuar</strong> (o <strong>Permitir</strong>).</li>
-                </ol>
-              </div>
-              <div style="margin-top: 0.55rem;">
-                Al finalizar, copia la <strong>URL de la aplicación web</strong> (termina en <code>/exec</code>) y pégala en el formulario de abajo.
-              </div>
-              <div class="deploy-fields-box" style="margin-top: 0.65rem; background-color: #ECFDF5; border-color: #A7F3D0; color: #064E3B;">
-                <div>
-                  <strong>Configuración única · Qué incluye automáticamente tu conector:</strong>
-                  <p style="margin: 0.25rem 0 0.45rem;">
-                    Este paso en Apps Script <strong>solo se hace una vez</strong> y tu archivo sigue siendo <strong>100% privado</strong>:
-                  </p>
-                  <ul class="guide-summary-list">
-                    <li>
-                      <strong>Pestañas mensuales automáticas:</strong> crea una pestaña por cada mes (ej. <em>Noviembre 2026</em>) y la coloca siempre al inicio.
-                    </li>
-                    <li>
-                      <strong>Directorio <code>Trabajadores</code> y rastreo de celulares:</strong> asigna un <strong>ID numérico de 8 dígitos</strong>, congela el nombre de cada persona y numera cada teléfono en orden fijo (<code>#1 Titular</code>, <code>#2</code>, <code>#3</code>…).
-                    </li>
-                    <li>
-                      <strong>Sello criptográfico <code>HMAC-SHA256</code>:</strong> firma cada registro en el servidor y detecta cualquier edición manual desde el menú <strong>&#128737;&#65039; Cronos</strong>.
-                    </li>
-                    <li>
-                      <strong>Perfil de Admin con creación de hojas en 1 clic:</strong> genera tu propio <strong>ID de Admin de 8 dígitos</strong> + <strong>PIN de 4 números</strong> para crear nuevas hojas (ej. <em>Asistencia 2027</em>) en 1 clic y contar también con tu sección de Checador.
-                    </li>
-                  </ul>
-                </div>
-              </div>
+              <strong>Copia la URL /exec</strong>
+              <p>
+                Copia la <strong>URL de la aplicación web</strong> terminada en <code>/exec</code> y pégala en la columna 1.
+              </p>
             </li>
           </ol>
+
+          <div class="setup-guide-footer-note">
+            <strong class="guide-summary-heading">Funciones incluidas automáticamente:</strong>
+            <ul class="guide-summary-list">
+              <li>
+                <strong>Configuración única:</strong> con esta URL <code>/exec</code> podrás crear nuevas hojas anuales o por sucursal con 1 clic desde este panel.
+              </li>
+              <li>
+                <strong>Aprobación de personal:</strong> cada trabajador nuevo entra como <strong>Pendiente</strong> hasta que lo apruebes con 1 clic o en la pestaña <strong>Trabajadores</strong>.
+              </li>
+              <li>
+                <strong>Integridad y auditoría:</strong> cada marca genera un sello <strong>HMAC-SHA256</strong> encadenado y audita el dispositivo utilizado.
+              </li>
+              <li>
+                <strong>Resumen Mensual en vivo:</strong> calcula asistencias, horas trabajadas, puntualidad y alertas GPS automáticamente.
+              </li>
+            </ul>
+          </div>
         </div>
       </details>
 
-      <!-- Admin 3-Column Grid: 1) Perfil & Conector, 2) Mis Hojas, 3) Cartel QR & Enlace -->
       <div class="admin-grid" id="admin-grid">
-        <!-- COLUMN 1: Admin Profile & Connector Form -->
+        <!-- Column 1: Admin Profile & Primary Connection -->
         <div class="card no-print" id="admin-form-card">
           <div class="card-body">
-            <h2 class="view-title" style="font-size: 1.15rem; margin-bottom: 0.35rem;">1. Perfil de Administrador</h2>
-            <p class="view-lead" style="font-size: 0.84rem; margin-bottom: 0.9rem;">
-              Crea tu perfil con tu nombre, tu <strong>ID único de Admin (8 dígitos)</strong> y un <strong>PIN de 4 números</strong>. Así podrás entrar en <em>"Ya tengo mi ID"</em> desde cualquier dispositivo y usar tanto tus opciones de Admin como tu Checador.
+            <div class="eyebrow">Columna 1 · Configuración</div>
+            <h1 id="admin-heading" class="card-title">1. Perfil Admin y Conexión</h1>
+            <p class="card-lead">
+              Configura tu identidad de administrador (ID serie 9 + PIN de 4 números) y conecta tu URL <code>/exec</code>.
             </p>
 
-            <!-- Active Admin Session Shortcut to Checador -->
-            <div class="admin-session-summary" id="admin-session-summary" hidden>
+            <!-- Active Admin Session Summary Banner -->
+            <div id="admin-session-summary" class="admin-session-summary" hidden>
               <div class="admin-session-summary-top">
-                <span class="admin-session-summary-who">
-                  <strong id="admin-summary-name">—</strong> · ID <code id="admin-summary-id">----</code>
-                </span>
-                <button type="button" class="btn-copy-chip" id="btn-copy-summary-admin-id">
-                  Copiar ID
+                <div>
+                  <span class="admin-session-kicker">SESIÓN DE ADMIN ACTIVA</span>
+                  <strong id="admin-summary-name" class="admin-session-name">—</strong>
+                </div>
+                <div class="admin-session-id-wrap">
+                  <span class="admin-session-id-label">MI ID ADMIN</span>
+                  <span id="admin-summary-id" class="admin-session-id-code">9000-0000</span>
+                </div>
+              </div>
+              <div class="admin-session-summary-actions">
+                <button type="button" id="btn-admin-go-checador" class="btn btn-primary btn-sm">
+                  Ir a mi Checador (<span id="admin-go-checador-sheet-name">Hoja activa</span>)
+                </button>
+                <button type="button" id="btn-copy-summary-admin-id" class="btn btn-secondary btn-sm">
+                  Copiar mi ID
                 </button>
               </div>
-              <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-admin-go-checador">
-                ⏱️ Ir a mi Checador en: <span id="admin-go-checador-sheet-name">Hoja activa</span>
-              </button>
-              <p class="admin-session-summary-hint">
-                Al seleccionar otra hoja en la columna <strong>Mis Hojas</strong>, tu Checador cambia automáticamente a esa hoja.
-              </p>
             </div>
 
-            <div class="alert alert-error" id="admin-form-error" role="alert" hidden></div>
+            <div id="admin-form-error" class="alert alert-error" role="alert" hidden></div>
 
-            <form id="form-admin-generate" novalidate>
-              <div class="field">
-                <label class="field-label" for="admin-worker-name">Tu Nombre Completo (Administrador)</label>
+            <form id="form-admin-generate" class="stack-md" novalidate>
+              <div>
+                <label for="admin-worker-name" class="field-label">
+                  Tu nombre de Administrador
+                </label>
                 <input
                   type="text"
                   id="admin-worker-name"
-                  class="input-text"
+                  class="field-input"
                   placeholder="Ej. Angel Merino"
                   maxlength="80"
-                  autocomplete="name"
                   required
-                >
-                <p class="field-hint">Quedará congelado a tu ID de Administrador para que también puedas checar asistencia.</p>
+                />
               </div>
 
-              <div class="id-showcase-box" style="margin-bottom: 1rem; padding: 0.75rem 0.9rem;">
-                <span class="id-showcase-label">TU ID ÚNICO DE ADMINISTRADOR (8 DÍGITOS · NO SE REPITE CON TRABAJADORES)</span>
-                <div class="id-showcase-digits" id="admin-generated-id" style="font-size: 1.55rem;">9000-0000</div>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-admin-id">
-                  Copiar mi ID de Admin (8 dígitos)
-                </button>
-              </div>
-
-              <div class="field">
-                <label class="field-label" for="admin-pin">PIN de Seguridad de Admin (exactamente 4 números)</label>
-                <input
-                  type="password"
-                  id="admin-pin"
-                  class="input-text input-mono input-id-code"
-                  inputmode="numeric"
-                  pattern="[0-9]{4}"
-                  placeholder="Ej. 1234 (4 números)"
-                  maxlength="4"
-                  autocomplete="new-password"
-                  required
-                >
-                <p class="field-hint">
-                  <strong>Longitud obligatoria: 4 dígitos numéricos (0-9).</strong> Guárdalo junto con tu ID de 8 dígitos para iniciar sesión como Admin desde cualquier celular o navegador.
+              <!-- Pre-generated 8-Digit Admin ID Card (Starts with 9 so it never collides with Worker IDs) -->
+              <div class="id-generated-box is-admin-id-box">
+                <div class="id-generated-header">
+                  <span class="id-generated-kicker">ID DE ADMINISTRADOR (8 DÍGITOS)</span>
+                  <button type="button" id="btn-copy-admin-id" class="btn-copy-chip">
+                    Copiar ID
+                  </button>
+                </div>
+                <div id="admin-generated-id" class="id-generated-digits">9000-0000</div>
+                <p class="id-generated-hint">
+                  Úsalo en <strong>"Ya tengo mi ID"</strong> junto con tu PIN desde cualquier dispositivo.
                 </p>
               </div>
 
-              <div class="field">
-                <label class="field-label" for="admin-org-name">Nombre de la Empresa / Hoja principal</label>
+              <div>
+                <label for="admin-pin" class="field-label">
+                  PIN de seguridad (exactamente 4 números)
+                </label>
+                <input
+                  type="password"
+                  id="admin-pin"
+                  class="field-input"
+                  placeholder="Ej. 2580"
+                  inputmode="numeric"
+                  maxlength="4"
+                  autocomplete="off"
+                  required
+                />
+                <span class="field-hint">
+                  Protege la creación de hojas, aprobaciones y tu inicio de sesión.
+                </span>
+              </div>
+
+              <div>
+                <label for="admin-org-name" class="field-label">
+                  Nombre de la hoja principal
+                </label>
                 <input
                   type="text"
                   id="admin-org-name"
-                  class="input-text"
-                  placeholder="Ej. Limpieza Sonora 2026"
+                  class="field-input"
+                  placeholder="Ej. Asistencia 2026"
                   maxlength="60"
                   required
-                >
+                />
               </div>
 
-              <div class="field">
-                <label class="field-label" for="admin-script-url">URL del Web App de Google Apps Script</label>
+              <div>
+                <label for="admin-script-url" class="field-label">
+                  URL de Apps Script (/exec)
+                </label>
                 <input
                   type="url"
                   id="admin-script-url"
-                  class="input-text input-mono"
-                  placeholder="https://script.google.com/macros/s/.../exec"
+                  class="field-input field-input-mono"
+                  placeholder="https://script.google.com/macros/s/AKfycb.../exec"
                   autocomplete="off"
                   spellcheck="false"
                   required
-                >
-                <p class="field-hint">Pega la URL <code>/exec</code> de tu conector (solo la configuras una vez).</p>
+                />
               </div>
 
-              <button type="submit" class="btn btn-emerald btn-block" id="btn-generate-access">
-                Guardar Perfil de Admin y Generar QR
+              <button type="submit" id="btn-generate-access" class="btn btn-primary btn-lg">
+                Guardar Perfil y Conectar
               </button>
             </form>
           </div>
         </div>
 
-        <!-- COLUMN 2: Catalog of Sheets + 1-Click New Sheet Creator -->
+        <!-- Column 2: Admin Sheets Catalog, 1-Click Sheet Creator & Worker Approvals -->
         <div class="card no-print" id="admin-sheets-panel" hidden>
           <div class="card-body">
+            <div class="eyebrow">Columna 2 · Hojas y Personal</div>
             <div class="admin-sheets-header">
-              <h2 class="view-title" style="font-size: 1.15rem; margin-bottom: 0;">2. Mis Hojas de Google Sheets</h2>
-              <span class="admin-sheets-badge" id="admin-sheets-count-badge">1 hoja</span>
+              <h2 class="card-title" style="margin-bottom: 0.15rem;">2. Hojas de Google Sheets</h2>
+              <span class="setup-badge" id="admin-sheets-count-badge">1 hoja</span>
             </div>
-            <p class="view-lead" style="font-size: 0.83rem; margin-bottom: 0.85rem;">
-              Toca cualquier hoja para mostrar su QR en la columna derecha y usarla como tu hoja activa al ir a tu Checador.
+            <p class="card-lead" style="margin-bottom: 0.75rem;">
+              Selecciona la hoja activa para actualizar el póster QR, tu checador y la lista de personal.
             </p>
 
-            <div class="admin-sheets-list" id="admin-sheets-list" role="list"></div>
+            <div id="admin-sheets-list" class="admin-sheets-list" role="list"></div>
 
-            <div class="admin-create-sheet-box">
-              <h3 class="admin-create-sheet-title">➕ Crear nueva hoja en 1 clic</h3>
-              <p class="admin-create-sheet-desc">
-                Crea un nuevo archivo en tu Google Drive vinculado a este mismo conector y genera su código QR al instante (ideal para cambiar de año o abrir otra sucursal/empresa).
+            <!-- 1-Click New Sheet Creator -->
+            <div class="admin-new-sheet-box">
+              <h3 class="admin-new-sheet-title">Nueva hoja en Drive (1 clic)</h3>
+              <p class="admin-new-sheet-desc">
+                Crea otro archivo de Google Sheets conectado al mismo script.
               </p>
 
-              <div class="alert" id="admin-create-sheet-status" role="status" aria-live="polite" hidden></div>
+              <div id="admin-create-sheet-status" class="alert" role="status" hidden></div>
 
-              <form id="form-admin-create-sheet" novalidate>
-                <div class="field" style="margin-bottom: 0.7rem;">
-                  <label class="field-label" for="new-sheet-org-name">Nombre del nuevo Google Sheets</label>
+              <form id="form-admin-create-sheet" class="stack-sm" novalidate>
+                <div>
+                  <label for="new-sheet-org-name" class="field-label">
+                    Nombre de la nueva hoja / empresa
+                  </label>
                   <input
                     type="text"
                     id="new-sheet-org-name"
-                    class="input-text"
-                    placeholder="Ej. Asistencia Limpieza 2027"
+                    class="field-input"
+                    placeholder="Ej. Asistencia 2027 o Sucursal Norte"
                     maxlength="60"
-                    required
-                  >
+                  />
                 </div>
 
                 <label class="admin-checkbox-row" for="new-sheet-copy-workers">
-                  <input
-                    type="checkbox"
-                    id="new-sheet-copy-workers"
-                    class="admin-checkbox-input"
-                  >
+                  <input type="checkbox" id="new-sheet-copy-workers" class="admin-checkbox-input" />
                   <span class="admin-checkbox-copy">
-                    <strong>Copiar la pestaña "Trabajadores" de una hoja existente</strong>
-                    <span>Conserva los IDs de 8 dígitos, nombres congelados e historial de celulares en la nueva hoja para que ese equipo no tenga que registrarse de cero.</span>
+                    <strong>Copiar directorio de Trabajadores</strong>
+                    <span>Conserva los IDs de 8 dígitos del personal activo.</span>
                   </span>
                 </label>
 
-                <div class="field admin-source-sheet-box" id="new-sheet-source-box" hidden>
-                  <label class="field-label" for="new-sheet-source-select">¿De cuál hoja deseas copiar la lista de Trabajadores?</label>
-                  <select id="new-sheet-source-select" class="input-text"></select>
-                  <p class="field-hint">
-                    Elige la empresa u hoja cuyos trabajadores quieres migrar al nuevo archivo.
-                  </p>
+                <div id="new-sheet-source-box" class="admin-source-sheet-box" hidden>
+                  <label for="new-sheet-source-select" class="field-label">
+                    Copiar trabajadores desde:
+                  </label>
+                  <select id="new-sheet-source-select" class="field-input"></select>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-block" id="btn-create-new-sheet">
-                  ➕ Crear nuevo Google Sheets y generar QR
+                <button type="submit" id="btn-create-new-sheet" class="btn btn-dark btn-block">
+                  Crear hoja en mi Drive
                 </button>
               </form>
             </div>
 
-            <!-- 1-Click Worker Approvals & Ex-Worker Deactivation -->
+            <!-- 1-Click Worker Approvals & Deactivation Directory -->
             <div class="admin-workers-box" id="admin-workers-box">
               <div class="admin-workers-header">
                 <div>
-                  <h3 class="admin-create-sheet-title" style="margin-bottom: 0.15rem;">👥 Solicitudes y Acceso de Trabajadores</h3>
-                  <p class="admin-create-sheet-desc" style="margin-bottom: 0;">
-                    Aprueba nuevos ingresos (<code>🟡 Pendiente</code>) o da de baja a ex-trabajadores (<code>🔴 Baja</code>) en 1 clic. También puedes cambiarlo desde el desplegable de la columna <strong>Estatus de Acceso</strong> en Google Sheets.
+                  <h3 class="admin-new-sheet-title" style="margin-bottom: 0.1rem;">
+                    Personal de la hoja activa
+                  </h3>
+                  <p class="admin-new-sheet-desc" style="margin-bottom: 0;">
+                    Aprueba ingresos o da de baja con 1 clic.
                   </p>
                 </div>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-workers" title="Recargar directorio de trabajadores">
-                  🔄 Actualizar
+                <button type="button" id="btn-refresh-workers" class="btn btn-secondary btn-sm">
+                  Actualizar
                 </button>
               </div>
-              <div class="admin-workers-stats" id="admin-workers-stats"></div>
-              <div class="admin-workers-list" id="admin-workers-list" role="list"></div>
+
+              <div id="admin-workers-stats" class="admin-workers-stats"></div>
+              <div id="admin-workers-list" class="admin-workers-list" role="list"></div>
             </div>
           </div>
         </div>
 
-        <!-- COLUMN 3: Output Column (QR Poster + Magic Link + Connection Test) -->
-        <div class="card" id="admin-output-card" hidden>
+        <!-- Column 3: Generated QR Poster & Actions -->
+        <div id="admin-output-card" class="card" hidden>
           <div class="card-body">
-            <h2 class="view-title no-print" style="font-size: 1.15rem; margin-bottom: 0.75rem;">3. Código QR y Enlace Activo</h2>
-            <!-- Printable Wall Poster -->
-            <div class="poster-card" id="printable-poster">
-              <div class="poster-header">
-                <div class="poster-kicker">CRONOS · CHECADOR DE ASISTENCIA</div>
-                <h2 class="poster-org" id="poster-org-title">—</h2>
+            <div class="eyebrow no-print">Columna 3 · Código QR y Enlace</div>
+            <!-- Printable Poster Area -->
+            <div id="poster-card" class="poster-card">
+              <div class="poster-kicker">REGISTRO DE ASISTENCIA · CRONOS</div>
+              <h2 id="poster-org-title" class="poster-org">—</h2>
+              <div class="poster-qr-frame">
+                <canvas id="admin-qr-canvas" width="256" height="256" aria-label="Código QR de la empresa"></canvas>
               </div>
-              <div class="poster-qr-wrap">
-                <canvas id="admin-qr-canvas" aria-label="Código QR de vinculación"></canvas>
-              </div>
-              <p class="poster-steps">
-                <strong>1.</strong> Escanea este QR con la cámara de tu celular &nbsp;·&nbsp;
-                <strong>2.</strong> Escribe tu nombre &nbsp;·&nbsp;
-                <strong>3.</strong> Marca tu Entrada o Salida
-              </p>
+              <ol class="poster-steps">
+                <li>Escanea este código QR con la cámara de tu teléfono.</li>
+                <li>Ingresa tu nombre para solicitar acceso o entra con tu ID de 8 dígitos.</li>
+                <li>Registra tu <strong>Entrada</strong> o <strong>Salida</strong> con ubicación GPS.</li>
+              </ol>
             </div>
 
-            <!-- Controls (hidden on @media print) -->
-            <div class="admin-actions-stack no-print">
+            <!-- Non-printed Admin Controls -->
+            <div class="admin-controls no-print stack-sm">
+              <!-- Direct shortcut to open active Google Sheet -->
               <a
+                id="btn-open-active-sheet"
                 href="#"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="btn btn-secondary btn-sm btn-block"
-                id="btn-open-active-sheet"
+                class="btn btn-secondary btn-block"
                 hidden
               >
-                📊 Abrir esta hoja en Google Sheets
+                Abrir Google Sheet activo
               </a>
-              <div class="field" style="margin-bottom: 0;">
-                <label class="field-label" for="admin-magic-link">Magic Link de invitación</label>
-                <input
-                  type="text"
-                  id="admin-magic-link"
-                  class="input-text input-mono"
-                  readonly
-                >
+
+              <div>
+                <label for="admin-magic-link" class="field-label">
+                  Enlace directo (WhatsApp)
+                </label>
+                <div class="input-row">
+                  <input
+                    type="text"
+                    id="admin-magic-link"
+                    class="field-input field-input-mono"
+                    readonly
+                  />
+                  <button type="button" id="btn-copy-magic-link" class="btn btn-secondary">
+                    Copiar
+                  </button>
+                </div>
               </div>
 
-              <button type="button" class="btn btn-emerald btn-block" id="btn-copy-magic-link">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span>Copiar enlace de invitación (WhatsApp)</span>
+              <button type="button" id="btn-share-whatsapp" class="btn btn-whatsapp btn-block">
+                Compartir enlace por WhatsApp
               </button>
 
-              <div class="action-row-2">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-share-whatsapp">
-                  Abrir en WhatsApp
+              <div class="btn-grid-2">
+                <button type="button" id="btn-download-qr" class="btn btn-secondary">
+                  Descargar PNG
                 </button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-download-qr">
-                  Descargar QR (PNG)
+                <button type="button" id="btn-print-qr" class="btn btn-secondary">
+                  Imprimir póster
                 </button>
               </div>
 
-              <button type="button" class="btn btn-secondary btn-sm btn-block" id="btn-print-qr">
-                Imprimir cartel QR para pared
-              </button>
-
-              <!-- Connection Test -->
-              <div class="test-box">
-                <button type="button" class="btn btn-primary btn-block" id="btn-test-connection">
+              <div class="admin-test-zone">
+                <button type="button" id="btn-test-connection" class="btn btn-dark btn-block">
                   Probar conexión (insertar fila de prueba)
                 </button>
-                <div class="alert" id="test-connection-result" role="status" aria-live="polite" style="margin-top: 0.75rem; margin-bottom: 0;" hidden></div>
+                <div id="test-connection-result" class="alert" role="status" hidden></div>
               </div>
             </div>
           </div>
         </div>
       </div>
     </section>
-
   </main>
 
-  <footer class="app-footer no-print">
-    Cronos · PWA Serverless de Código Abierto · Tus datos viven únicamente en tu Google Sheets
-  </footer>
-
   <!-- =====================================================================
-       MODAL 1: OFFICIAL STAMPED CHECK-IN CONFIRMATION
+       MODAL 1: STAMPED CHECK-IN RECEIPT CONFIRMATION
        ===================================================================== -->
-  <div class="modal-backdrop" id="modal-success" role="dialog" aria-modal="true" aria-labelledby="success-headline" hidden>
-    <div class="modal-card">
-      <div class="receipt-banner" id="success-banner">
-        <div class="receipt-stamp" id="success-stamp">REGISTRO CONFIRMADO</div>
-        <div class="receipt-time-big" id="success-time-big">--:--</div>
-        <p class="receipt-headline" id="success-headline"></p>
+  <div
+    id="modal-success"
+    class="modal-backdrop no-print"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="success-headline"
+    hidden
+  >
+    <div class="modal-card receipt-modal">
+      <div id="success-banner" class="receipt-banner">
+        <div class="receipt-stamp">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span id="success-stamp">ENTRADA REGISTRADA</span>
+        </div>
+        <div id="success-time-big" class="receipt-time-big">08:01 AM</div>
+        <p id="success-headline" class="receipt-headline">
+          ¡Entrada registrada con éxito!
+        </p>
       </div>
 
       <div class="receipt-details">
         <div class="receipt-row">
           <span class="receipt-row-label">Trabajador</span>
-          <span class="receipt-row-val" id="success-worker">—</span>
+          <span id="success-worker" class="receipt-row-val">—</span>
         </div>
         <div class="receipt-row">
-          <span class="receipt-row-label">ID Trabajador</span>
-          <span class="receipt-row-val" id="success-worker-id">—</span>
+          <span class="receipt-row-label">ID Personal</span>
+          <span id="success-worker-id" class="receipt-row-val">----</span>
         </div>
         <div class="receipt-row">
           <span class="receipt-row-label">Empresa</span>
-          <span class="receipt-row-val" id="success-org">—</span>
+          <span id="success-org" class="receipt-row-val">—</span>
         </div>
         <div class="receipt-row">
           <span class="receipt-row-label">Fecha y hora oficial</span>
-          <span class="receipt-row-val" id="success-server-time">—</span>
+          <span id="success-server-time" class="receipt-row-val">—</span>
         </div>
         <div class="receipt-row">
           <span class="receipt-row-label">Zona horaria</span>
-          <span class="receipt-row-val" id="success-timezone">—</span>
+          <span id="success-timezone" class="receipt-row-val">—</span>
         </div>
         <div class="receipt-row">
           <span class="receipt-row-label">Precisión GPS</span>
-          <span class="receipt-row-val" id="success-accuracy">—</span>
+          <span id="success-accuracy" class="receipt-row-val">—</span>
         </div>
         <div class="receipt-row" id="success-folio-row" hidden>
-          <span class="receipt-row-label">Folio oficial</span>
-          <span class="receipt-row-val" id="success-folio">—</span>
+          <span class="receipt-row-label">Folio mensual</span>
+          <span id="success-folio" class="receipt-row-val">—</span>
         </div>
         <div class="receipt-row" id="success-seal-row" hidden>
-          <span class="receipt-row-label">Sello HMAC</span>
-          <span class="receipt-row-val" id="success-seal">—</span>
+          <span class="receipt-row-label">Sello digital</span>
+          <span id="success-seal" class="receipt-row-val">—</span>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm btn-block" id="btn-copy-receipt" style="margin-bottom: 0.45rem;" hidden>
-          📋 Copiar comprobante firmado
+        <button type="button" id="btn-copy-receipt" class="btn btn-secondary btn-block" hidden>
+          Copiar comprobante firmado
         </button>
-        <button type="button" class="btn btn-primary btn-block" id="btn-close-success">
+        <button type="button" id="btn-close-success" class="btn btn-primary btn-lg">
           Listo
         </button>
       </div>
@@ -912,152 +1022,180 @@
   </div>
 
   <!-- =====================================================================
-       MODAL 2: ANTI-DOUBLE-PUNCH CONFIRMATION (< 5 MINUTES)
+       MODAL 2: DUPLICATE PUNCH CONFIRMATION (< 5 minutes)
        ===================================================================== -->
-  <div class="modal-backdrop" id="modal-confirm-repeat" role="dialog" aria-modal="true" aria-labelledby="repeat-title" hidden>
+  <div
+    id="modal-confirm-repeat"
+    class="modal-backdrop no-print"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="repeat-title"
+    hidden
+  >
     <div class="modal-card">
-      <div class="card-body" style="padding-bottom: 0.5rem;">
-        <span class="eyebrow" style="color: var(--accent-amber);">Registro reciente detectado</span>
-        <h2 class="view-title" id="repeat-title" style="font-size: 1.25rem;">¿Registrar nuevamente?</h2>
-        <p class="view-lead" id="repeat-message" style="font-size: 0.92rem;"></p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-primary btn-block" id="btn-confirm-repeat-yes">
-          Sí, registrar de nuevo
-        </button>
-        <button type="button" class="btn btn-secondary btn-block" id="btn-confirm-repeat-no">
-          Cancelar
-        </button>
+      <div class="card-body">
+        <div class="eyebrow">Prevención de duplicados</div>
+        <h2 id="repeat-title" class="card-title">¿Registrar de nuevo?</h2>
+        <p id="repeat-message" class="card-lead"></p>
+        <div class="stack-xs">
+          <button type="button" id="btn-confirm-repeat-yes" class="btn btn-dark btn-block">
+            Sí, registrar de nuevo
+          </button>
+          <button type="button" id="btn-confirm-repeat-no" class="btn btn-secondary btn-block">
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- =====================================================================
-       MODAL 3: OPCIONES DE SESIÓN Y HOJA (Cambiar QR/Hoja, Cambiar sesión, Kiosco, Cerrar sesión)
+       MODAL 3: SESSION & COMPANY MENU
        ===================================================================== -->
-  <div class="modal-backdrop" id="modal-account" role="dialog" aria-modal="true" aria-labelledby="account-modal-title" hidden>
+  <div
+    id="modal-account"
+    class="modal-backdrop no-print"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="account-modal-title"
+    hidden
+  >
     <div class="modal-card">
-      <div class="card-body" style="padding-bottom: 0.75rem;">
-        <span class="eyebrow">Opciones</span>
-        <h2 class="view-title" id="account-modal-title" style="font-size: 1.22rem; margin-bottom: 0.2rem;">
-          Sesión y hoja activa
-        </h2>
-        <p class="view-lead" id="account-modal-sub" style="font-size: 0.87rem; margin-bottom: 0.95rem;"></p>
+      <div class="card-body">
+        <div class="eyebrow">Ajustes de cuenta</div>
+        <h2 id="account-modal-title" class="card-title">Sesión y empresa</h2>
+        <p class="card-lead" id="account-modal-sub">—</p>
 
-        <div style="display: flex; flex-direction: column; gap: 0.65rem;">
-          <button type="button" class="option-card-btn is-featured" id="btn-switch-qr">
+        <div class="stack-sm">
+          <!-- Option 1: 1-step QR / Sheet switch keeping current worker session -->
+          <button type="button" id="btn-switch-qr" class="option-card-btn is-featured">
             <span class="option-card-head">
               <span class="option-card-title">Cambiar QR / Hoja</span>
-              <span class="option-pill">Mantiene tu sesión</span>
+              <span class="option-pill">Conserva tu ID</span>
             </span>
             <span class="option-card-desc" id="desc-switch-qr">
-              Escanea un nuevo QR (ej. nueva hoja anual) conservando tu nombre e ID actual.
+              Escanea otro QR (ej. nueva hoja anual) conservando tu sesión actual.
             </span>
           </button>
 
-          <button type="button" class="option-card-btn" id="btn-change-worker">
+          <!-- Option 2: Switch worker session via 8-digit ID (keeps current company) -->
+          <button type="button" id="btn-change-worker" class="option-card-btn">
             <span class="option-card-head">
-              <span class="option-card-title">Cambiar sesión</span>
+              <span class="option-card-title">Cambiar sesión (otro ID)</span>
               <span class="option-pill is-neutral">Misma empresa</span>
             </span>
             <span class="option-card-desc" id="desc-change-worker">
-              Permite que otro trabajador ingrese con su ID de 8 dígitos en esta misma hoja.
+              Permite que otro trabajador ingrese con su ID de 8 dígitos en este dispositivo.
             </span>
           </button>
 
-          <button type="button" class="option-card-btn" id="btn-open-kiosk">
+          <!-- Option 3: Kiosk Mode (Shared Tablet / Guardhouse Terminal) -->
+          <button type="button" id="btn-open-kiosk" class="option-card-btn">
             <span class="option-card-head">
-              <span class="option-card-title">🖥️ Modo Kiosco (Caseta / Tablet)</span>
-              <span class="option-pill is-neutral">Terminal fija</span>
+              <span class="option-card-title">Modo Kiosco (Caseta / Tablet)</span>
+              <span class="option-pill is-neutral">Por ID de 8 dígitos</span>
             </span>
             <span class="option-card-desc">
-              Abre un teclado numérico en pantalla para que el personal registre Entrada o Salida rápidamente con su ID de 8 dígitos.
+              Teclado numérico para que varios trabajadores registren su Entrada o Salida con su ID.
             </span>
           </button>
 
-          <button type="button" class="option-card-btn is-danger" id="btn-unlink-company">
+          <!-- Option 4: Full Logout (Red / Danger — Wipes Company + Worker + Session) -->
+          <button type="button" id="btn-unlink-company" class="option-card-btn is-danger">
             <span class="option-card-head">
               <span class="option-card-title" id="title-unlink-company">Cerrar sesión</span>
-              <span class="option-pill is-danger-pill">Borra datos</span>
+              <span class="option-pill is-danger-pill">Desvincular todo</span>
             </span>
             <span class="option-card-desc" id="desc-unlink-company">
-              Borra y desvincula de este celular la empresa (QR/Sheets), tu usuario y tu sesión.
+              Borra de este dispositivo la empresa vinculada, tu perfil y tu sesión.
             </span>
           </button>
-        </div>
-      </div>
 
-      <div class="modal-footer" style="padding-top: 0.5rem;">
-        <button type="button" class="btn btn-secondary btn-block" id="btn-close-account">
-          Cerrar menú
-        </button>
+          <button type="button" id="btn-close-account" class="btn btn-secondary btn-block">
+            Volver al checador
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- =====================================================================
-       MODAL 4: TARJETA DE NUEVO ID DE TRABAJADOR (8 DÍGITOS)
+       MODAL 4: WORKER 8-DIGIT PERSONAL ID CARD
        ===================================================================== -->
-  <div class="modal-backdrop" id="modal-worker-id" role="dialog" aria-modal="true" aria-labelledby="worker-id-modal-title" hidden>
+  <div
+    id="modal-worker-id"
+    class="modal-backdrop no-print"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="worker-id-modal-title"
+    hidden
+  >
     <div class="modal-card">
-      <div class="card-body" style="padding-bottom: 0.6rem;">
-        <span class="eyebrow" style="color: var(--action-in);">Guarda este número · No lo pierdas</span>
-        <h2 class="view-title" id="worker-id-modal-title" style="font-size: 1.25rem;">
-          Tu ID único de acceso
-        </h2>
-        <p class="view-lead" id="worker-id-modal-lead" style="font-size: 0.89rem; margin-bottom: 0.85rem;">
-          Tu nombre (<strong id="modal-id-worker-name">—</strong>) quedó congelado a este ID de 8 dígitos. Si cambias de celular o necesitas checar desde otro teléfono, usa <strong>Cambiar sesión</strong> e ingresa este número:
+      <div class="card-body">
+        <div class="eyebrow">Identificador único</div>
+        <h2 id="worker-id-modal-title" class="card-title">Tu ID de 8 dígitos</h2>
+        <p class="card-lead" style="margin-bottom: 0.9rem;">
+          Guarda este código. Si cambias de teléfono o usas otro dispositivo, elige
+          <strong>"Ya tengo mi ID"</strong> e ingrésalo para recuperar tu perfil.
         </p>
 
         <div class="id-showcase-box">
-          <span class="id-showcase-label">ID DE TRABAJADOR (8 DÍGITOS)</span>
+          <span class="id-showcase-label" id="modal-id-worker-name">TRABAJADOR</span>
           <div class="id-showcase-digits" id="modal-id-digits">0000-0000</div>
-          <button type="button" class="btn btn-secondary btn-sm" id="btn-modal-copy-id">
+        </div>
+
+        <div class="stack-xs" style="margin-top: 1.1rem;">
+          <button type="button" id="btn-modal-copy-id" class="btn btn-primary btn-lg">
             Copiar mi ID
           </button>
+          <button type="button" id="btn-close-worker-id" class="btn btn-secondary btn-block">
+            Cerrar
+          </button>
         </div>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="btn btn-emerald btn-block" id="btn-close-worker-id">
-          Ya lo guardé, ir al checador
-        </button>
       </div>
     </div>
   </div>
 
   <!-- =====================================================================
-       MODAL 5: MODO KIOSCO (TERMINAL POR ID DE 8 DÍGITOS PARA TABLET / CASETA)
+       MODAL 5: KIOSK TERMINAL MODE (Shared Device / Guardhouse Numpad)
        ===================================================================== -->
-  <div class="modal-backdrop" id="modal-kiosk" role="dialog" aria-modal="true" aria-labelledby="kiosk-title" hidden>
+  <div
+    id="modal-kiosk"
+    class="modal-backdrop no-print"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="kiosk-title"
+    hidden
+  >
     <div class="modal-card kiosk-modal-card">
       <div class="kiosk-header">
         <div>
-          <span class="kiosk-kicker">🖥️ TERMINAL MODO KIOSCO</span>
-          <h2 class="kiosk-org-title" id="kiosk-title">—</h2>
+          <span class="kiosk-kicker">TERMINAL DE ASISTENCIA · KIOSCO</span>
+          <h2 id="kiosk-title" class="kiosk-org-title">—</h2>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" id="btn-close-kiosk">
-          Salir de Kiosco
+        <button type="button" id="btn-close-kiosk" class="btn-ghost-sm">
+          Salir
         </button>
       </div>
 
       <div class="kiosk-body">
         <div class="kiosk-display-box">
-          <label class="kiosk-display-label" for="input-kiosk-id">INGRESA TU ID DE 8 DÍGITOS</label>
+          <span class="kiosk-display-label">INGRESA TU ID DE 8 DÍGITOS</span>
           <input
             type="text"
             id="input-kiosk-id"
             class="kiosk-id-input"
-            inputmode="numeric"
             placeholder="0000-0000"
-            maxlength="9"
+            inputmode="numeric"
             autocomplete="off"
-          >
+            maxlength="9"
+          />
         </div>
 
-        <div class="alert" id="kiosk-feedback-box" role="status" aria-live="polite" hidden></div>
+        <div id="kiosk-feedback-box" class="alert" role="status" hidden></div>
 
-        <div class="kiosk-numpad" role="group" aria-label="Teclado numérico de Kiosco">
+        <!-- Tactile Numeric Keypad -->
+        <div class="kiosk-numpad" aria-label="Teclado numérico de Kiosco">
           <button type="button" class="kiosk-key" data-kiosk-key="1">1</button>
           <button type="button" class="kiosk-key" data-kiosk-key="2">2</button>
           <button type="button" class="kiosk-key" data-kiosk-key="3">3</button>
@@ -1069,23 +1207,27 @@
           <button type="button" class="kiosk-key" data-kiosk-key="9">9</button>
           <button type="button" class="kiosk-key is-action" data-kiosk-key="clear">Limpiar</button>
           <button type="button" class="kiosk-key" data-kiosk-key="0">0</button>
-          <button type="button" class="kiosk-key is-action" data-kiosk-key="back">⌫</button>
+          <button type="button" class="kiosk-key is-action" data-kiosk-key="back">Borrar</button>
         </div>
 
         <div class="kiosk-punch-actions">
-          <button type="button" class="btn btn-emerald btn-block kiosk-punch-btn" id="btn-kiosk-in">
-            🟢 REGISTRAR ENTRADA
+          <button type="button" id="btn-kiosk-in" class="btn btn-primary kiosk-punch-btn">
+            ENTRADA
           </button>
-          <button type="button" class="btn btn-primary btn-block kiosk-punch-btn is-kiosk-out" id="btn-kiosk-out">
-            🔵 REGISTRAR SALIDA
+          <button type="button" id="btn-kiosk-out" class="btn btn-dark kiosk-punch-btn is-kiosk-out">
+            SALIDA
           </button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Toast Feedback -->
-  <div class="toast" id="app-toast" role="status" aria-live="polite" hidden></div>
+  <!-- Global Toast Feedback -->
+  <div id="app-toast" class="toast no-print" role="status" aria-live="polite" hidden></div>
+
+  <footer class="app-footer no-print">
+    <span>Cronos · Control de asistencia verificada en Google Sheets</span>
+  </footer>
 
   <script type="module" src="./js/app.js"></script>
 </body>

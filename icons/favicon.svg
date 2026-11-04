@@ -1,13 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
-  <rect width="128" height="128" rx="28" fill="#0F172A"/>
-  <rect x="8" y="8" width="112" height="112" rx="22" stroke="#1E293B" stroke-width="2"/>
-  <circle cx="64" cy="64" r="40" stroke="#F8FAFC" stroke-width="7"/>
-  <!-- Cardinal tick marks -->
-  <line x1="64" y1="16" x2="64" y2="21" stroke="#94A3B8" stroke-width="4" stroke-linecap="round"/>
-  <line x1="112" y1="64" x2="107" y2="64" stroke="#94A3B8" stroke-width="4" stroke-linecap="round"/>
-  <line x1="64" y1="112" x2="64" y2="107" stroke="#94A3B8" stroke-width="4" stroke-linecap="round"/>
-  <line x1="16" y1="64" x2="21" y2="64" stroke="#94A3B8" stroke-width="4" stroke-linecap="round"/>
-  <!-- Clock hands forming check-in gesture -->
-  <path d="M48 65L59 76L84 48" stroke="#10B981" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="64" cy="24" r="4.5" fill="#F59E0B"/>
+  <defs>
+    <linearGradient id="bgGlass" x1="16" y1="8" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E293B"/>
+      <stop offset="0.55" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#090D16"/>
+    </linearGradient>
+    <linearGradient id="rimLight" x1="20" y1="12" x2="108" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC" stop-opacity="0.42"/>
+      <stop offset="0.5" stop-color="#94A3B8" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#38BDF8" stop-opacity="0.25"/>
+    </linearGradient>
+    <linearGradient id="accentSweep" x1="42" y1="82" x2="88" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#059669"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+  </defs>
+  <!-- Squircle Optical Housing -->
+  <rect x="6" y="6" width="116" height="116" rx="30" fill="url(#bgGlass)"/>
+  <rect x="7" y="7" width="114" height="114" rx="29" stroke="url(#rimLight)" stroke-width="2"/>
+  <!-- Outer Horological Track -->
+  <circle cx="64" cy="64" r="41" stroke="#334155" stroke-width="1.75" stroke-dasharray="2 6"/>
+  <circle cx="64" cy="64" r="34" stroke="#E2E8F0" stroke-width="2.5" stroke-opacity="0.88"/>
+  <!-- Precision Cardinal Indices -->
+  <line x1="64" y1="19" x2="64" y2="26" stroke="#F8FAFC" stroke-width="3" stroke-linecap="round"/>
+  <line x1="109" y1="64" x2="102" y2="64" stroke="#64748B" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="64" y1="109" x2="64" y2="102" stroke="#64748B" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="19" y1="64" x2="26" y2="64" stroke="#64748B" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Chronometer Hands & Verification Vector -->
+  <path d="M49 65.5L59.5 76L85 45.5" stroke="url(#accentSweep)" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Optical Pivot -->
+  <circle cx="64" cy="64" r="3.5" fill="#F8FAFC"/>
 </svg>

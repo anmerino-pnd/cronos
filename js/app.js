@@ -687,17 +687,17 @@ function renderWelcomeView() {
   showWelcomeError('');
 
   if (isQuickSwitch) {
-    el['welcome-eyebrow'].textContent = 'Cambio de hoja · Manteniendo tu sesión';
+    el['welcome-eyebrow'].textContent = 'Cambio de hoja · Conservando sesión';
     el['welcome-heading'].textContent = 'Vincular nuevo QR o enlace';
     el['welcome-lead'].textContent =
-      `Escanea el nuevo código QR o pega el nuevo enlace (por ejemplo, nueva hoja anual). Seguirás en tu sesión como "${existing.workerName}" (ID ${formatWorkerId8(existing.workerId)}).`;
+      `Escanea el nuevo código QR o pega el enlace de la nueva hoja. Continuarás como "${existing.workerName}" (ID ${formatWorkerId8(existing.workerId)}).`;
     el['label-open-scanner'].textContent = 'Escanear nuevo código QR';
     el['btn-cancel-quick-switch'].hidden = false;
   } else {
-    el['welcome-eyebrow'].textContent = 'Vinculación de trabajador';
+    el['welcome-eyebrow'].textContent = 'Acceso de personal';
     el['welcome-heading'].textContent = 'Conecta con tu empresa';
     el['welcome-lead'].textContent =
-      'Escanea el código QR de tu lugar de trabajo o pega el enlace de invitación recibido por WhatsApp.';
+      'Escanea el código QR de tu centro de trabajo o pega tu enlace de acceso.';
     el['label-open-scanner'].textContent = 'Escanear QR de mi empresa';
     el['btn-cancel-quick-switch'].hidden = true;
   }
@@ -1030,7 +1030,7 @@ async function handleSaveWorkerRegistration(event) {
       toastMsg: `Perfil guardado · ID ${formatWorkerId8(workerId)}`
     });
 
-    // Sync registration request with backend (handles 🟡 Pendiente or 🔴 Baja device/name blocks)
+    // Sync registration request with backend (handles Pendiente or Baja device/name blocks)
     if (navigator.onLine) {
       syncNewWorkerRegistrationWithBackend(targetCompany, workerId, workerName);
     }
@@ -1478,7 +1478,7 @@ function renderChecadorView() {
   el['punch-loading-box'].hidden = true;
   el['punch-error-box'].hidden = true;
 
-  // Render Account Status Gate (🟢 Activo vs 🟡 Pendiente vs 🔴 Baja)
+  // Render Account Status Gate (Activo vs Pendiente vs Baja)
   const accStatus = config.isAdmin ? 'activo' : (config.accountStatus || 'activo');
   const isPending = accStatus === 'pendiente';
   const isBlocked = accStatus === 'baja';
@@ -1595,7 +1595,7 @@ function renderWorkerHistory() {
     const badge = document.createElement('span');
     const isQueued = item.status === 'queued';
     badge.className = `worker-history-type ${isQueued ? 'is-queued' : (item.type === 'ENTRADA' ? 'is-in' : 'is-out')}`;
-    badge.textContent = isQueued ? `⏳ ${item.type} (Offline)` : item.type;
+    badge.textContent = isQueued ? `${item.type} (Offline)` : item.type;
 
     const timeSpan = document.createElement('span');
     timeSpan.className = 'worker-history-time';
@@ -1609,10 +1609,10 @@ function renderWorkerHistory() {
     const meta = document.createElement('div');
     meta.className = 'worker-history-meta';
     if (isQueued) {
-      meta.textContent = 'Pendiente de sincronizar al conectar a internet';
+      meta.textContent = 'Pendiente de sincronizar al recuperar conexión';
     } else {
       const folioPart = item.folio ? `${item.folio} · ` : '';
-      const sealShort = item.seal ? `🔒 ${item.seal.slice(0, 15)}…` : 'Verificado';
+      const sealShort = item.seal ? `Sello ${item.seal.slice(0, 15)}…` : 'Verificado';
       meta.textContent = `${folioPart}${sealShort}`;
     }
     left.appendChild(meta);
@@ -1622,7 +1622,7 @@ function renderWorkerHistory() {
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'btn-copy-chip';
-      copyBtn.textContent = '📋 Recibo';
+      copyBtn.textContent = 'Recibo';
       copyBtn.addEventListener('click', async () => {
         const receiptTxt = buildSignedReceiptText({
           type: item.type,
@@ -1944,7 +1944,7 @@ function enqueueOfflinePunch({
   renderWorkerHistory();
   renderLastCheckinFooter();
 
-  showToast(`📡 ${type} guardada en Cola Offline. Se enviará al recuperar señal.`, 3800);
+  showToast(`${type} guardada en Cola Offline. Se enviará al recuperar señal.`, 3800);
 }
 
 async function syncOfflineQueue({ silent = false } = {}) {
@@ -2018,9 +2018,9 @@ async function syncOfflineQueue({ silent = false } = {}) {
     }
 
     if (syncedCount > 0 && !silent) {
-      showToast(`✅ Se sincronizaron ${syncedCount} registro(s) pendientes.`, 3400);
+      showToast(`Se sincronizaron ${syncedCount} registro(s) pendientes.`, 3400);
     } else if (syncedCount > 0 && silent) {
-      showToast(`📡 Cola Offline sincronizada (${syncedCount} registro(s))`, 3000);
+      showToast(`Cola Offline sincronizada (${syncedCount} registro(s))`, 3000);
     }
   } finally {
     state.syncingOfflineQueue = false;
@@ -2387,7 +2387,7 @@ async function handleKioskPunch(type) {
       const parts = formatServerTimeParts(punchRes.localTime);
       feedback.className = 'alert alert-success';
       feedback.textContent =
-        `✅ ${type} confirmada: ${punchRes.workerName || resolvedName} (ID ${formatWorkerId8(digits8)}) · ${parts.time12h}`;
+        `${type} confirmada: ${punchRes.workerName || resolvedName} (ID ${formatWorkerId8(digits8)}) · ${parts.time12h}`;
       el['input-kiosk-id'].value = '';
       if (navigator.vibrate) navigator.vibrate([45, 50, 45]);
     } else {
@@ -2577,7 +2577,13 @@ function renderAdminSheetsCatalog() {
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'admin-sheet-name';
-    nameSpan.textContent = `${isCurrent ? '● ' : ''}${item.orgName}`;
+    if (isCurrent) {
+      const pip = document.createElement('span');
+      pip.className = 'status-pip is-active';
+      pip.setAttribute('aria-hidden', 'true');
+      nameSpan.appendChild(pip);
+    }
+    nameSpan.appendChild(document.createTextNode(item.orgName));
 
     const metaSpan = document.createElement('span');
     metaSpan.className = 'admin-sheet-meta';
@@ -2600,7 +2606,7 @@ function renderAdminSheetsCatalog() {
       openLink.target = '_blank';
       openLink.rel = 'noopener noreferrer';
       openLink.className = 'admin-sheet-open-link';
-      openLink.textContent = '📊 Abrir Sheet';
+      openLink.textContent = 'Abrir Sheet';
       row.appendChild(openLink);
     }
 
@@ -2617,7 +2623,7 @@ function renderAdminWorkersList() {
 
   const workers = Array.isArray(state.adminWorkersList) ? state.adminWorkersList.slice() : [];
 
-  // Sort: 🟡 Pendiente first, then 🟢 Activo, then 🔴 Baja
+  // Sort: Pendiente first, then Activo, then Baja
   const priority = { pendiente: 0, activo: 1, baja: 2 };
   workers.sort((a, b) => {
     const pa = priority[a.accountStatus] ?? 1;
@@ -2638,14 +2644,18 @@ function renderAdminWorkersList() {
 
   statsEl.innerHTML = '';
   const pills = [
-    { text: `🟡 ${pendingCount} pendiente(s)`, cls: 'is-pending' },
-    { text: `🟢 ${activeCount} activo(s)`, cls: 'is-active' },
-    { text: `🔴 ${bajaCount} baja(s)`, cls: 'is-baja' }
+    { text: `${pendingCount} pendiente(s)`, cls: 'is-pending' },
+    { text: `${activeCount} activo(s)`, cls: 'is-active' },
+    { text: `${bajaCount} baja(s)`, cls: 'is-baja' }
   ];
   for (const p of pills) {
     const span = document.createElement('span');
     span.className = `admin-worker-stat-pill ${p.cls}`;
-    span.textContent = p.text;
+    const pip = document.createElement('span');
+    pip.className = `status-pip ${p.cls}`;
+    pip.setAttribute('aria-hidden', 'true');
+    span.appendChild(pip);
+    span.appendChild(document.createTextNode(p.text));
     statsEl.appendChild(span);
   }
 
@@ -2670,7 +2680,10 @@ function renderAdminWorkersList() {
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'admin-worker-name';
-    nameSpan.textContent = w.workerName + (w.isAdmin ? ' (Admin)' : '');
+    const rawName = String(w.workerName || '');
+    nameSpan.textContent = rawName.includes('[Admin]')
+      ? rawName
+      : rawName + (w.isAdmin ? ' (Admin)' : '');
 
     const idSpan = document.createElement('span');
     idSpan.className = 'admin-worker-id';
@@ -2684,8 +2697,14 @@ function renderAdminWorkersList() {
     bottom.className = 'admin-worker-bottom';
 
     const statusTag = document.createElement('span');
-    statusTag.className = 'admin-worker-status-tag';
-    statusTag.textContent = w.accountStatusLabel || (st === 'pendiente' ? '🟡 Pendiente' : (st === 'baja' ? '🔴 Baja' : '🟢 Activo'));
+    const pipCls = st === 'pendiente' ? 'is-pending' : (st === 'baja' ? 'is-baja' : 'is-active');
+    statusTag.className = `admin-worker-status-tag ${pipCls}`;
+    const statusPip = document.createElement('span');
+    statusPip.className = `status-pip ${pipCls}`;
+    statusPip.setAttribute('aria-hidden', 'true');
+    statusTag.appendChild(statusPip);
+    const cleanStatusText = st === 'pendiente' ? 'Pendiente' : (st === 'baja' ? 'Baja' : 'Activo');
+    statusTag.appendChild(document.createTextNode(cleanStatusText));
     bottom.appendChild(statusTag);
 
     if (!w.isAdmin && !String(w.workerId || '').startsWith('9')) {
@@ -2696,28 +2715,28 @@ function renderAdminWorkersList() {
         const approveBtn = document.createElement('button');
         approveBtn.type = 'button';
         approveBtn.className = 'btn-worker-action is-approve';
-        approveBtn.textContent = '✅ Aprobar';
+        approveBtn.textContent = 'Aprobar';
         approveBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'activo'));
         actions.appendChild(approveBtn);
 
         const rejectBtn = document.createElement('button');
         rejectBtn.type = 'button';
         rejectBtn.className = 'btn-worker-action is-baja';
-        rejectBtn.textContent = '🚫 Dar de baja';
+        rejectBtn.textContent = 'Dar de baja';
         rejectBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'baja'));
         actions.appendChild(rejectBtn);
       } else if (st === 'activo') {
         const bajaBtn = document.createElement('button');
         bajaBtn.type = 'button';
         bajaBtn.className = 'btn-worker-action is-baja';
-        bajaBtn.textContent = '🚫 Dar de baja';
+        bajaBtn.textContent = 'Dar de baja';
         bajaBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'baja'));
         actions.appendChild(bajaBtn);
       } else if (st === 'baja') {
         const reactivateBtn = document.createElement('button');
         reactivateBtn.type = 'button';
         reactivateBtn.className = 'btn-worker-action is-approve';
-        reactivateBtn.textContent = '🔄 Reactivar';
+        reactivateBtn.textContent = 'Reactivar';
         reactivateBtn.addEventListener('click', () => handleAdminSetWorkerStatus(w.workerId, 'activo'));
         actions.appendChild(reactivateBtn);
       }
@@ -2770,7 +2789,7 @@ async function refreshAdminWorkersForActiveSheet({ silent = false } = {}) {
   } finally {
     if (el['btn-refresh-workers'] && !silent) {
       el['btn-refresh-workers'].disabled = false;
-      el['btn-refresh-workers'].textContent = '🔄 Actualizar';
+      el['btn-refresh-workers'].textContent = 'Actualizar';
     }
   }
 }
@@ -2787,6 +2806,7 @@ async function handleAdminSetWorkerStatus(workerId, newStatus) {
         sheetId: state.activeAdminAccess.sheetId || '',
         adminPin,
         workerId,
+        targetWorkerId: workerId,
         newStatus
       },
       { allowStatusGates: true }
@@ -2799,12 +2819,12 @@ async function handleAdminSetWorkerStatus(workerId, newStatus) {
         for (const w of state.adminWorkersList) {
           if (w.workerId === workerId) {
             w.accountStatus = newStatus;
-            w.accountStatusLabel = newStatus === 'baja' ? '🔴 Baja' : (newStatus === 'pendiente' ? '🟡 Pendiente' : '🟢 Activo');
+            w.accountStatusLabel = newStatus === 'baja' ? 'Baja' : (newStatus === 'pendiente' ? 'Pendiente' : 'Activo');
           }
         }
       }
       renderAdminWorkersList();
-      const label = newStatus === 'baja' ? 'dado de baja (🔴 Baja)' : 'aprobado (🟢 Activo)';
+      const label = newStatus === 'baja' ? 'dado de baja (Baja)' : 'aprobado (Activo)';
       showToast(`${res.workerName || 'Trabajador'} ${label}`);
     } else if (res && res.message) {
       showToast(res.message, 3500);
